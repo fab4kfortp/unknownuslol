@@ -52,6 +52,8 @@ export const runSimulation        = (payload) => postJSON(R2_BASE, "/simulate", 
 export const fetchTwinBenchmark   = ()        => getJSON(R2_BASE, "/twin/benchmark");
 export const runOptimizer         = (payload) => postJSON(R2_BASE, "/optimize", payload);
 export const fetchReviewQueue     = ()        => getJSON(R2_BASE, "/categoriser/review-queue");
+export const submitCategoryCorrection = (payload) => postJSON(R2_BASE, "/categoriser/correct", payload);
 export const submitTransaction    = (payload) => postJSON(R2_BASE, "/transactions", payload);
 export const sendAgentChat        = (payload) => postJSON(R2_BASE, "/agent/chat", payload);
+export const fetchCalibration     = ()        => getJSON(R2_BASE, "/calibration");
 

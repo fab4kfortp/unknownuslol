@@ -12,7 +12,7 @@
 // goal planning), not faked screens.
 
 import { useEffect, useState } from "react";
-import { LayoutDashboard, Receipt, Repeat, LineChart, Target, Shuffle } from "lucide-react";
+import { LayoutDashboard, Receipt, Repeat, LineChart, Target, Shuffle, FlaskConical, Sliders, MessageSquareText, Activity } from "lucide-react";
 import { getSummary, getTrends, getRecurring, getForecast, getTransactions } from "./api";
 import Sidebar from "./components/Sidebar.jsx";
 import HealthMetrics from "./components/HealthMetrics.jsx";
@@ -22,14 +22,20 @@ import AttentionPanel from "./components/AttentionPanel.jsx";
 import TransactionsTable from "./components/TransactionsTable.jsx";
 import PlaceholderTab from "./components/PlaceholderTab.jsx";
 import DecisionSimulator from "./components/DecisionSimulator.jsx";
+import BenchmarkScreen from "./components/BenchmarkScreen.jsx";
+import OptimizerScreen from "./components/OptimizerScreen.jsx";
+import ReviewQueueScreen from "./components/ReviewQueueScreen.jsx";
+import VerifiedAgentChat from "./components/VerifiedAgentChat.jsx";
 
 const TABS = [
-  { id: "dashboard",  label: "Dashboard",            icon: LayoutDashboard },
-  { id: "transactions", label: "Transactions",       icon: Receipt },
-  { id: "recurring",  label: "Recurring Payments",   icon: Repeat },
-  { id: "simulate",   label: "Simulate a Decision",  icon: Shuffle },
-  { id: "insights",   label: "Insights",             icon: LineChart },
-  { id: "goals",      label: "Goals",                icon: Target },
+  { id: "dashboard",   label: "Dashboard",            icon: LayoutDashboard },
+  { id: "transactions",label: "Transactions",         icon: Receipt },
+  { id: "recurring",   label: "Recurring Payments",   icon: Repeat },
+  { id: "simulate",    label: "Simulate a Decision",  icon: Shuffle },
+  { id: "benchmark",   label: "Model Benchmark",      icon: FlaskConical },
+  { id: "optimizer",   label: "Minimum-Change Plan",  icon: Sliders },
+  { id: "agent",       label: "AI Copilot",           icon: MessageSquareText },
+  { id: "review",      label: "Categoriser Review",   icon: Activity },
 ];
 
 function App() {
@@ -164,23 +170,27 @@ function App() {
               </div>
             )}
 
-            {activeTab === "insights" && (
+            {activeTab === "benchmark" && (
               <div className="mb-8">
-                <PlaceholderTab
-                  icon={LineChart}
-                  title="Conversational Q&A — coming in the 24-hour build"
-                  note="Ask questions about spending, savings, and affordability directly against this data. Scoped for hours 4-9 of the final build."
-                />
+                <BenchmarkScreen />
               </div>
             )}
 
-            {activeTab === "goals" && (
+            {activeTab === "optimizer" && (
               <div className="mb-8">
-                <PlaceholderTab
-                  icon={Target}
-                  title="Multi-path simulation & goals — coming in the 24-hour build"
-                  note="Compare 2-3 realistic decision paths side-by-side (cut spend / refinance / do nothing) and set savings goals. Scoped for hours 9-15 of the final build."
-                />
+                <OptimizerScreen />
+              </div>
+            )}
+
+            {activeTab === "agent" && (
+              <div className="mb-8">
+                <VerifiedAgentChat />
+              </div>
+            )}
+
+            {activeTab === "review" && (
+              <div className="mb-8">
+                <ReviewQueueScreen />
               </div>
             )}
           </div>

@@ -1,0 +1,34 @@
+# SpendShield - Data Pipeline & M3 Infrastructure
+
+This repository builds the SpendShield backend data pipelines and infrastructure.
+
+## Data Lineage & Kaggle Datasets
+
+To ensure our active-learning ML models and personas are built on empirical truth, we utilize three real-world Kaggle datasets stored securely in `data/`:
+
+1. **`data.csv` (Indian Personal Finance and Spending Habits)**
+   - **Scale:** ~20,000 real Indian household rows.
+   - **Schema:** Detailed demographics (`Income`, `Age`, `Occupation`, `City_Tier`) alongside cross-sectional monthly spends (`Rent`, `Groceries`, `Healthcare`, `Desired_Savings`, etc.).
+   - **Usage:** Provides the exact categorical split and empirical financial distributions for different personas.
+
+2. **`personal_transactions.csv` & `Personal_Finance_Dataset.csv`**
+   - **Scale:** Transaction-level datasets containing raw merchant narrations and spends.
+   - **Usage:** Provides real-world linguistic noise, merchant string variants, and category structures to robustly train the NLP Categoriser.
+
+### Data Transformations (M3 Pipeline)
+
+1. **Transaction Mapping (`data/kaggle_transactions_mapped.csv`)**
+   - `src/personas/setup_kaggle_and_rbi.py` combines the raw Kaggle transaction files into a unified dataset.
+   - It rigorously maps Kaggle-native categories (e.g. `Mortgage & Rent`, `Airfare`, `Coffee Shops`) into the 12 canonical SpendShield categories.
+   - The Character n-gram TF-IDF + Calibrated Logistic Regression model uses this dataset directly.
+
+2. **Persona B (Gig Worker) Generator (`src/personas/persona_b_generator.py`)**
+   - Persona B dynamically samples its income and expense distributions strictly from the `Occupation == "Self_Employed"` segment of `data.csv`.
+   - Instead of inventing fake merchants, the transactions are populated by pulling real merchant descriptions from `kaggle_transactions_mapped.csv`.
+   - This ensures Persona B accurately reflects real gig-worker volatility natively found in the Indian macro-economy.
+
+3. **Macro-Economic Calibration (`data/calibration_table.json`)**
+   - The simulated data is rigorously calibrated against the **RBI Financial Stability Report (June 2026)** and the **National Health Accounts (2021-22)**.
+   - You can verify the live dataset alignment and read the mandatory compliance disclosure by calling `GET /calibration`.
+
+*Note: Member 2 files (`src/twin/`, `src/recommend.py`, `src/optimizer.py`, `src/recurring.py`, `benchmarks/`) are strictly preserved and untouched by this M3 pipeline to allow for independent parallel development.*

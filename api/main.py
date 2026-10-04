@@ -216,57 +216,86 @@ def optimize_plan(request: OptimizerRequest):
 
 @app.get("/categoriser/review-queue", response_model=ReviewQueueResponse)
 def get_review_queue():
-    try:
-        if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "src", "categoriser", "active_learning.py")):
-            from src.categoriser.active_learning import get_queue
-            return get_queue()
-    except ImportError:
-        pass
-        
-    items = [
-        ReviewQueueItem(
-            transaction_id="mock-txn-123",
-            description="UPI-UNKNOWN-MCHNT",
-            amount=450.0,
-            date=datetime.date.today(),
-            predicted_category="Shopping",
-            confidence_score=0.45,
-            state=DataState.needs_review
+    df = _run_pipeline()
+    # Find transactions that need review
+    needs_review_df = df[df["needs_review"] == True].head(50)
+    
+    items = []
+    for idx, row in needs_review_df.iterrows():
+        items.append(
+            ReviewQueueItem(
+                transaction_id=str(idx),
+                description=row["merchant"],
+                amount=row["amount"],
+                date=row["date"].date(),
+                predicted_category=row.get("category", "Uncategorised"),
+                confidence_score=row.get("category_confidence", 0.0),
+                state=DataState.needs_review
+            )
         )
-    ]
     return ReviewQueueResponse(items=items)
+
+
+@app.post("/categoriser/correct")
+def correct_category(request: ReviewCorrectionRequest):
+    try:
+        from src.categoriser import apply_correction_and_retrain
+        df = _run_pipeline()
+        try:
+            idx = int(request.transaction_id)
+            narration = df.loc[idx]["merchant"]
+        except (ValueError, KeyError):
+            narration = "UNKNOWN"
+            
+        res = apply_correction_and_retrain(request.transaction_id, narration, request.corrected_category)
+        return res
+    except ImportError:
+        return {"status": "error", "message": "ML Categoriser not found"}
 
 
 @app.post("/transactions", response_model=LiveTransactionResponse)
 def post_transaction(request: LiveTransactionRequest):
     try:
-        if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "src", "live_update.py")):
-            from src.live_update import process_live_transaction
-            return process_live_transaction(request)
+        from src.live_update import process_live_transaction
+        return process_live_transaction(request)
     except ImportError:
-        pass
-        
-    return LiveTransactionResponse(
-        transaction_id=str(uuid.uuid4()),
-        categorised_as=request.transaction.category or "Shopping",
-        confidence=0.88,
-        state=DataState.ok,
-        updated_twin=None,
-        updated_simulation=None
-    )
+        return LiveTransactionResponse(
+            transaction_id=str(uuid.uuid4()),
+            categorised_as=request.transaction.category or "Shopping",
+            confidence=0.88,
+            state=DataState.ok,
+            updated_twin=None,
+            updated_simulation=None
+        )
 
 
 @app.post("/agent/chat", response_model=AgentChatResponse)
 def agent_chat(request: AgentChatRequest):
+    df = _run_pipeline()
     try:
-        if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "src", "agent")):
-            from src.agent.chat import handle_chat
-            return handle_chat(request)
-    except ImportError:
-        pass
-        
-    return AgentChatResponse(
-        answer=f"Simulated verified answer for: {request.query}",
-        verified_claims=True,
-        unmatched_numbers_flagged=[]
-    )
+        from src.agent.chat import handle_chat
+        return handle_chat(request, df)
+    except ImportError as e:
+        print(f"ImportError in agent_chat: {e}")
+        return AgentChatResponse(
+            answer=f"Simulated verified answer for: {request.query}",
+            verified_claims=True,
+            unmatched_numbers_flagged=[]
+        )
+
+@app.get("/calibration")
+def get_calibration():
+    from src.calibration import get_calibration_tags, load_calibration_table
+    df = _run_pipeline()
+    
+    # Calculate tags using Persona data
+    tags = get_calibration_tags(df)
+    
+    # Load raw sources
+    sources = load_calibration_table()
+    
+    return {
+        "alignment_tags": tags,
+        "sources": sources,
+        "mandatory_disclosure": "Data models are calibrated against RBI Financial Stability Report (June 2026) and National Health Accounts (2021-22) baselines to ensure realistic stress-testing parameters."
+    }
