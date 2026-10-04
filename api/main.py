@@ -162,56 +162,81 @@ def get_simulate_presets():
 def get_twin_benchmark():
     df = _run_pipeline()
     try:
-        if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "src", "twin")):
-            from src.twin.benchmark import run_benchmark
-            return run_benchmark(df)
-    except ImportError:
-        pass
+        from src.twin.twin_model import forecast as twin_forecast
+        from src.forecast_model import compute_daily_net_cashflow, backtest
         
-    daily = compute_daily_net_cashflow(df)
-    bt = backtest(daily, holdout_days=30)
-    fwd = forecast_forward(daily, forecast_days=30)
-    
-    forecasts = []
-    for _, row in fwd.iterrows():
-        forecasts.append(DailyForecast(
-            date=row["date"].date(),
-            p10=round(row["confidence_low"], 2),
-            p50=round(row["predicted_net_cashflow"], 2),
-            p90=round(row["confidence_high"], 2)
-        ))
+        daily = compute_daily_net_cashflow(df)
+        fwd = twin_forecast(df, forecast_days=30)
         
-    metrics = ForecastMetrics(
-        mae=float(bt.get("mae_per_day", 0.0)),
-        mase=1.1, 
-        coverage=float(bt.get("confidence_band_coverage_pct", 80.0)),
-        interval_width=abs(float(fwd.iloc[0]["confidence_high"] - fwd.iloc[0]["confidence_low"]))
-    )
-    return TwinForecastResponse(forecasts=forecasts, metrics=metrics)
+        forecasts = []
+        for _, row in fwd.iterrows():
+            forecasts.append(DailyForecast(
+                date=row["date"].date(),
+                p10=round(row["confidence_low"], 2),
+                p50=round(row["predicted_net_cashflow"], 2),
+                p90=round(row["confidence_high"], 2)
+            ))
+            
+        bt = backtest(daily, holdout_days=30)
+        
+        metrics = ForecastMetrics(
+            mae=float(bt.get("mae_per_day", 0.0)),
+            mase=1.1, 
+            coverage=float(bt.get("confidence_band_coverage_pct", 80.0)),
+            interval_width=abs(float(fwd.iloc[0]["confidence_high"] - fwd.iloc[0]["confidence_low"]))
+        )
+        return TwinForecastResponse(forecasts=forecasts, metrics=metrics)
+    except ImportError as e:
+        print(f"Twin benchmark import error: {e}")
+        raise HTTPException(status_code=500, detail="M2 Twin model not available")
 
 
 @app.post("/optimize", response_model=OptimizerResponse)
-def optimize_plan(request: OptimizerRequest):
+def optimize_plan_endpoint(request: OptimizerRequest):
     try:
-        if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "src", "optimizer.py")):
-            from src.optimizer import optimize
-            return optimize(request)
-    except ImportError:
-        pass
+        from src.optimizer import optimize_plan
+        df = _run_pipeline()
         
-    levers = OptimizerLevers(
-        cut_spend_percentages={"Food": 0.15, "Shopping": 0.20},
-        purchase_delay_weeks=2,
-        extra_monthly_saving=1000.0,
-        amount_drawn_from_savings=0.0
-    )
-    return OptimizerResponse(
-        plan_found=True,
-        levers=levers,
-        resulting_shortfall_prob=0.05,
-        lifestyle_disruption_score=42.0,
-        explanation="Delaying the purchase by 2 weeks and cutting Food/Shopping drops the shortfall chance to 5%."
-    )
+        # M2's optimizer_plan expects: df, target_purchase, flexibility_weights, constraints
+        flexibility_weights = {
+            "Food & Dining": 0.5,
+            "Shopping": 0.6,
+            "Entertainment": 0.4,
+            "Transport": 0.2
+        }
+        constraints = {
+            "max_shortfall_prob": request.target_shortfall_prob,
+            "max_dti": 0.5
+        }
+        
+        plan, score = optimize_plan(df, request.goal_amount, flexibility_weights, constraints)
+        
+        if not plan:
+            return OptimizerResponse(
+                plan_found=False,
+                levers=OptimizerLevers(cut_spend_percentages={}, purchase_delay_weeks=0, extra_monthly_saving=0, amount_drawn_from_savings=0),
+                resulting_shortfall_prob=1.0,
+                lifestyle_disruption_score=float('inf'),
+                explanation="Could not find a safe minimum-change plan."
+            )
+            
+        levers = OptimizerLevers(
+            cut_spend_percentages=plan["cuts"],
+            purchase_delay_weeks=plan["purchase_delay_weeks"],
+            extra_monthly_saving=0.0,
+            amount_drawn_from_savings=0.0
+        )
+        
+        return OptimizerResponse(
+            plan_found=True,
+            levers=levers,
+            resulting_shortfall_prob=plan["sim_result"].shortfall_prob_90d,
+            lifestyle_disruption_score=score,
+            explanation=f"Found a plan by delaying {plan['purchase_delay_weeks']} weeks and cutting discretionary spend."
+        )
+    except ImportError as e:
+        print(f"Optimizer import error: {e}")
+        raise HTTPException(status_code=500, detail="M2 Optimizer not available")
 
 
 @app.get("/categoriser/review-queue", response_model=ReviewQueueResponse)

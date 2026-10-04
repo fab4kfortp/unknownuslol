@@ -48,11 +48,22 @@ def run_benchmarks(data_path, holdout_days=30):
     y_train = train["net_cashflow"].values
     y_test = actual["net_cashflow"].values
     
+    from twin.twin_model import TwinModel
+    
+    train = train.copy()
+    train['variable_remainder'] = train['net_cashflow']
+    twin = TwinModel()
+    twin_res = twin.fit_predict(train, forecast_days=len(actual))
+    twin_preds = twin_res["pred_remainder"].values
+    twin_low = twin_res["pred_remainder_low"].values
+    twin_high = twin_res["pred_remainder_high"].values
+    
     baselines = {
         "Naive Yesterday": eval_naive_yesterday(train, actual),
         "Same Weekday Last Week": eval_same_weekday_last_week(train, actual),
         "Moving Average": eval_moving_average(train, actual),
-        "Round 1 Linear Regression": eval_r1_linear_regression(train, actual)
+        "Round 1 Linear Regression": eval_r1_linear_regression(train, actual),
+        "Twin Model (Quantile GBDT)": twin_preds
     }
     
     window = trailing_90_days(train, cutoff)
@@ -63,10 +74,15 @@ def run_benchmarks(data_path, holdout_days=30):
         mae = np.abs(y_test - preds).mean()
         mase = compute_mase(y_train, y_test, preds, seasonality=7)
         
-        lower = preds - std_dev
-        upper = preds + std_dev
+        if name == "Twin Model (Quantile GBDT)":
+            lower = twin_low
+            upper = twin_high
+        else:
+            lower = preds - std_dev
+            upper = preds + std_dev
+            
         coverage = np.mean((y_test >= lower) & (y_test <= upper)) * 100
-        interval_width = 2 * std_dev
+        interval_width = np.mean(upper - lower)
         
         results.append({
             "Model": name,
@@ -80,4 +96,4 @@ def run_benchmarks(data_path, holdout_days=30):
     print(res_df.to_string(index=False))
 
 if __name__ == "__main__":
-    run_benchmarks("../data/persona_a_transactions.csv")
+    run_benchmarks("data/persona_a_transactions.csv")
