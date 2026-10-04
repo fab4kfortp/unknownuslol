@@ -12,7 +12,7 @@
 // goal planning), not faked screens.
 
 import { useEffect, useState } from "react";
-import { LayoutDashboard, Receipt, Repeat, LineChart, Target } from "lucide-react";
+import { LayoutDashboard, Receipt, Repeat, LineChart, Target, Shuffle } from "lucide-react";
 import { getSummary, getTrends, getRecurring, getForecast, getTransactions } from "./api";
 import Sidebar from "./components/Sidebar.jsx";
 import HealthMetrics from "./components/HealthMetrics.jsx";
@@ -21,13 +21,15 @@ import ForecastChart from "./components/ForecastChart.jsx";
 import AttentionPanel from "./components/AttentionPanel.jsx";
 import TransactionsTable from "./components/TransactionsTable.jsx";
 import PlaceholderTab from "./components/PlaceholderTab.jsx";
+import DecisionSimulator from "./components/DecisionSimulator.jsx";
 
 const TABS = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "transactions", label: "Transactions", icon: Receipt },
-  { id: "recurring", label: "Recurring Payments", icon: Repeat },
-  { id: "insights", label: "Insights", icon: LineChart },
-  { id: "goals", label: "Goals", icon: Target },
+  { id: "dashboard",  label: "Dashboard",            icon: LayoutDashboard },
+  { id: "transactions", label: "Transactions",       icon: Receipt },
+  { id: "recurring",  label: "Recurring Payments",   icon: Repeat },
+  { id: "simulate",   label: "Simulate a Decision",  icon: Shuffle },
+  { id: "insights",   label: "Insights",             icon: LineChart },
+  { id: "goals",      label: "Goals",                icon: Target },
 ];
 
 function App() {
@@ -153,6 +155,12 @@ function App() {
             {activeTab === "recurring" && (
               <div className="mb-8">
                 <RecurringTable payments={recurring.payments} />
+              </div>
+            )}
+
+            {activeTab === "simulate" && (
+              <div className="mb-8">
+                <DecisionSimulator />
               </div>
             )}
 
