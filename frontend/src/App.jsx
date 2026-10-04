@@ -89,7 +89,7 @@ function App() {
         <img src="/logo-icon.png" alt="SpendShield" className="w-16 h-16 opacity-80" />
         <p className="mt-5 text-navy font-semibold">Couldn't reach the SpendShield API.</p>
         <p className="mt-2 text-sm text-slate-500 max-w-md">
-          Please refresh in a few seconds. Details: {error}. (Running locally? Check that the API is up on port 8000.)
+          Please refresh in a few seconds. Details: {error}. (Running locally? Check that the API is up on port 8005.)
         </p>
       </div>
     );
