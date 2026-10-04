@@ -31,4 +31,6 @@ To ensure our active-learning ML models and personas are built on empirical trut
    - The simulated data is rigorously calibrated against the **RBI Financial Stability Report (June 2026)** and the **National Health Accounts (2021-22)**.
    - You can verify the live dataset alignment and read the mandatory compliance disclosure by calling `GET /calibration`.
 
-*Note: Member 2 files (`src/twin/`, `src/recommend.py`, `src/optimizer.py`, `src/recurring.py`, `benchmarks/`) are strictly preserved and untouched by this M3 pipeline to allow for independent parallel development.*
+### Round 2 Integration Complete
+- **Member 2 Integration**: The Quantile GBDT Twin Model (`src/twin/`), minimum-change optimizer (`src/optimizer.py`), and advanced recurring detector (`src/recurring_detector.py`) have been fully integrated into `api/main.py`.
+- **Member 1 UI**: The backend is flawlessly connected to the `ReviewQueueScreen`, `BenchmarkScreen`, `OptimizerScreen`, and `VerifiedAgentChat` React components. All systems are live.
