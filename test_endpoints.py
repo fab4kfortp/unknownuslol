@@ -23,7 +23,7 @@ def test_endpoints():
 
     print("\nTesting /categoriser/correct...")
     resp = client.post("/categoriser/correct", json={
-        "transaction_id": "0",
+        "tx_id": "0",
         "corrected_category": "Food & Dining"
     })
     print(f"Status: {resp.status_code}")
@@ -38,13 +38,11 @@ def test_endpoints():
 
     print("\nTesting /transactions...")
     resp = client.post("/transactions", json={
-        "transaction": {
-            "description": "TEST NEW TRANSACTION",
-            "amount": 500.0,
-            "date": "2023-10-01",
-            "transaction_type": "debit",
-            "account_type": "bank"
-        }
+        "narration": "TEST NEW TRANSACTION",
+        "amount": 500.0,
+        "date": "2023-10-01",
+        "tx_type": "debit",
+        "account_type": "bank"
     })
     print(f"Status: {resp.status_code}")
     if resp.status_code != 200:
@@ -52,7 +50,7 @@ def test_endpoints():
 
     print("\nTesting /agent/chat...")
     resp = client.post("/agent/chat", json={
-        "query": "Can I afford a Rs 80,000 laptop?"
+        "message": "Can I afford a Rs 80,000 laptop?"
     })
     print(f"Status: {resp.status_code}")
     if resp.status_code != 200:
@@ -60,6 +58,16 @@ def test_endpoints():
 
     print("\nTesting /twin/benchmark...")
     resp = client.get("/twin/benchmark")
+    print(f"Status: {resp.status_code}")
+    if resp.status_code != 200:
+        print(f"Error: {resp.text}")
+
+    print("\nTesting /optimize...")
+    resp = client.post("/optimize", json={
+      "target_amount": 50000,
+      "target_months": 4,
+      "max_shortfall_prob": 0.1
+    })
     print(f"Status: {resp.status_code}")
     if resp.status_code != 200:
         print(f"Error: {resp.text}")

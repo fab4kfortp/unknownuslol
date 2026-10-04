@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import date
 
 
@@ -98,6 +98,20 @@ class OptimizerRequest(BaseModel):
     target_purchase_months: int
     constraints: OptimizerConstraints = Field(default_factory=OptimizerConstraints)
 
+    @model_validator(mode="before")
+    @classmethod
+    def map_fields(cls, values):
+        if "target_amount" in values:
+            values["target_purchase_amount"] = values.pop("target_amount")
+        if "target_months" in values:
+            values["target_purchase_months"] = values.pop("target_months")
+        if "max_shortfall_prob" in values:
+            if "constraints" not in values:
+                values["constraints"] = {}
+            if isinstance(values["constraints"], dict):
+                values["constraints"]["target_shortfall_prob"] = values.pop("max_shortfall_prob")
+        return values
+
 
 class OptimizerLevers(BaseModel):
     cut_spend_percentages: Dict[str, float]
@@ -132,11 +146,25 @@ class ReviewQueueResponse(BaseModel):
 class ReviewCorrectionRequest(BaseModel):
     transaction_id: str
     corrected_category: str
+    
+    @model_validator(mode="before")
+    @classmethod
+    def map_fields(cls, values):
+        if "tx_id" in values:
+            values["transaction_id"] = values.pop("tx_id")
+        return values
 
 
 class AgentChatRequest(BaseModel):
     query: str
     context_data: Optional[Dict[str, Any]] = None
+    
+    @model_validator(mode="before")
+    @classmethod
+    def map_fields(cls, values):
+        if "message" in values:
+            values["query"] = values.pop("message")
+        return values
 
 
 class AgentChatResponse(BaseModel):
@@ -151,12 +179,28 @@ class TransactionInput(BaseModel):
     date: date
     transaction_type: str  # e.g., 'credit' or 'debit'
     category: Optional[str] = None
+    account_type: Optional[str] = None
 
 
 class LiveTransactionRequest(BaseModel):
     transaction: TransactionInput
     # Included to recalculate specific simulation presets upon live-update
     active_presets: Optional[List[SimulatorPreset]] = None
+    
+    @model_validator(mode="before")
+    @classmethod
+    def map_fields(cls, values):
+        if "transaction" not in values:
+            tx = {}
+            if "date" in values: tx["date"] = values.pop("date")
+            if "narration" in values: tx["description"] = values.pop("narration")
+            if "merchant" in values: tx["description"] = values.pop("merchant")
+            if "amount" in values: tx["amount"] = values.pop("amount")
+            if "tx_type" in values: tx["transaction_type"] = values.pop("tx_type")
+            if "type" in values: tx["transaction_type"] = values.pop("type")
+            if "account_type" in values: tx["account_type"] = values.pop("account_type")
+            values["transaction"] = tx
+        return values
 
 
 class LiveTransactionResponse(BaseModel):
