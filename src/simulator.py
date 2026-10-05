@@ -8,14 +8,12 @@ from api.schemas import (
     SimulatorResponse
 )
 
-# Optional Round 2 Import (Adapter check)
-try:
-    if os.path.exists("src/twin"):
-        import src.twin.forecast as twin_forecast
-    else:
-        twin_forecast = None
-except ImportError:
-    twin_forecast = None
+# Note: The Twin model (src.twin.twin_model) provides forecasting via its
+# forecast() function but does not expose the get_obligations/get_residuals
+# interface that this module's adapter originally expected.  The Round-1
+# fallback below (recurring detector + income analysis) is therefore the
+# correct production path for building simulator obligations/residuals.
+twin_forecast = None
 
 # Round 1 Fallbacks
 import src.forecast_model as fm

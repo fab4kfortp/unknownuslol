@@ -13,7 +13,7 @@
 
 const _DEV  = import.meta.env.DEV;
 const _PROD_ORIGIN = "https://spendshield-tj9v.onrender.com";
-const _DEV_ORIGIN  = "http://127.0.0.1:8005";
+const _DEV_ORIGIN  = "http://127.0.0.1:8000";
 
 const ORIGIN  = _DEV ? _DEV_ORIGIN : _PROD_ORIGIN;
 const R1_BASE = `${ORIGIN}/api`;   // R1: /api/summary, /api/forecast, …

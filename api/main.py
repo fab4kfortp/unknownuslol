@@ -205,11 +205,11 @@ def optimize_plan_endpoint(request: OptimizerRequest):
             "Transport": 0.2
         }
         constraints = {
-            "max_shortfall_prob": request.target_shortfall_prob,
+            "max_shortfall_prob": request.constraints.target_shortfall_prob,
             "max_dti": 0.5
         }
         
-        plan, score = optimize_plan(df, request.goal_amount, flexibility_weights, constraints)
+        plan, score = optimize_plan(df, request.target_purchase_amount, flexibility_weights, constraints)
         
         if not plan:
             return OptimizerResponse(

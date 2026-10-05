@@ -23,7 +23,7 @@ def handle_chat(request: AgentChatRequest, df: pd.DataFrame) -> AgentChatRespons
         tool_outputs["forecast"] = out
         val = out.get('predicted_net_cashflow_30d', 0)
         draft_answer = f"Your predicted net cashflow for the next 30 days is Rs {val:.2f}."
-    elif "simulate" in query or "decision" in query or "cut spend" in query:
+    elif "simulate" in query or "decision" in query or "cut spend" in query or "afford" in query or "buy" in query:
         req = SimulatorRequest(presets=[SimulatorPreset.do_nothing, SimulatorPreset.cut_spend], priority=SimulatorPriority.safest)
         out = simulate_decision(df, req)
         tool_outputs["simulate"] = out

@@ -1,13 +1,13 @@
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
-from forecast_model import (
+from src.forecast_model import (
     trailing_90_days, 
     fit_linear_forecast, 
     moving_average_fallback,
     compute_daily_net_cashflow
 )
-from recurring_detector import detect_recurring_payments
+from src.recurring_detector import detect_recurring_payments
 
 def generate_deterministic_forecast(daily_df, recurring_df, forecast_days=30):
     end_date = daily_df["date"].max()
@@ -90,8 +90,15 @@ class TwinModel:
         # Now predict for future
         end_date = df["date"].max()
         future_dates = pd.date_range(end_date + pd.Timedelta(days=1), periods=forecast_days)
-        future_df = pd.DataFrame({"date": future_dates, "net_cashflow": 0}) # dummy for rolling
+        # Seed future with the last known rolling means from training data so
+        # the GBDT receives meaningful context features instead of zeros.
+        last_rolling_7 = df['rolling_7_mean'].iloc[-1] if 'rolling_7_mean' in df.columns else 0
+        last_rolling_30 = df['rolling_30_mean'].iloc[-1] if 'rolling_30_mean' in df.columns else 0
+        future_df = pd.DataFrame({"date": future_dates, "net_cashflow": last_rolling_7})
         future_df, _ = extract_features(future_df)
+        # Override rolling means with carried-forward values from training window
+        future_df['rolling_7_mean'] = last_rolling_7
+        future_df['rolling_30_mean'] = last_rolling_30
         X_future = future_df[features]
         
         preds_50 = self.models[0.5].predict(X_future)
@@ -128,21 +135,22 @@ def auto_forecast(raw_transactions_df, holdout_days=30, forecast_days=30):
     cutoff = daily_df["date"].max() - pd.Timedelta(days=holdout_days)
     train = daily_df[daily_df["date"] <= cutoff]
     
+    actual = daily_df[daily_df["date"] > cutoff]["net_cashflow"].values
+    eval_days = len(actual)
+    
     # 1. Moving average
     window = trailing_90_days(train, cutoff)
-    ma_preds = moving_average_fallback(window, forecast_days=holdout_days)
+    ma_preds = moving_average_fallback(window, forecast_days=eval_days)
     
     # 2. Linear Regression
-    lr_preds, _ = fit_linear_forecast(window, forecast_days=holdout_days)
+    lr_preds, _ = fit_linear_forecast(window, forecast_days=eval_days)
     
     # 3. Twin Model
     twin = TwinModel()
-    twin_preds_df = twin.fit_predict(window, forecast_days=holdout_days)
+    twin_preds_df = twin.fit_predict(window, forecast_days=eval_days)
     twin_preds = twin_preds_df["pred_remainder"].values
     
     # Evaluate on holdout
-    actual = daily_df[daily_df["date"] > cutoff]["net_cashflow"].values
-    
     ma_mae = np.abs(actual - ma_preds).mean()
     lr_mae = np.abs(actual - lr_preds).mean()
     twin_mae = np.abs(actual - twin_preds).mean()

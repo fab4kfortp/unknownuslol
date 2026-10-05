@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from api.schemas import SimulatorPreset, SimulatorRequest
+from api.schemas import SimulatorPreset, SimulatorRequest, DataState
 from src.simulator import simulate_scenario, get_model_components
 
 def optimize_plan(df: pd.DataFrame, target_purchase: float, flexibility_weights: dict, constraints: dict):
@@ -15,7 +15,7 @@ def optimize_plan(df: pd.DataFrame, target_purchase: float, flexibility_weights:
     """
     # 1. Get baseline model components
     state, obligations, residuals = get_model_components(df)
-    if state != "ok":
+    if state != DataState.ok:
         return None, float('inf')
         
     start_date = df["date"].max() + pd.Timedelta(days=1)

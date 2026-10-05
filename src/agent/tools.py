@@ -27,9 +27,6 @@ def forecast(df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 def simulate_decision(df: pd.DataFrame, request: SimulatorRequest) -> Dict[str, Any]:
-    from simulator import simulate_decision as sim
-    # Run the deterministic simulator which lives in the root module `simulator.py` 
-    # (actually M1 put it in `src/simulator.py` but sys.path makes it `simulator` or `src.simulator`)
     try:
         from src.simulator import simulate_decision as sim
     except ImportError:
@@ -38,15 +35,36 @@ def simulate_decision(df: pd.DataFrame, request: SimulatorRequest) -> Dict[str, 
     res = sim(df, request)
     return res.dict() if hasattr(res, "dict") else res
 
-def optimize_plan(request: Any) -> Dict[str, Any]:
-    # M2's optimizer module, use a safe fallback if not present (as per M1's stub)
+def optimize_plan(df: pd.DataFrame, target_purchase: float = 50000.0) -> Dict[str, Any]:
+    """Wrapper around M2's optimizer module."""
     try:
-        from src.optimizer import optimize
-        res = optimize(request)
-        return res.dict() if hasattr(res, "dict") else res
+        from src.optimizer import optimize_plan as _optimize_plan
+        flexibility_weights = {
+            "Food & Dining": 0.5,
+            "Shopping": 0.6,
+            "Entertainment": 0.4,
+            "Transport": 0.2
+        }
+        constraints = {
+            "max_shortfall_prob": 0.10,
+            "max_dti": 0.5
+        }
+        plan, score = _optimize_plan(df, target_purchase, flexibility_weights, constraints)
+        if plan:
+            return {
+                "plan_found": True,
+                "resulting_shortfall_prob": plan["sim_result"].shortfall_prob_90d,
+                "lifestyle_disruption_score": score,
+                "explanation": f"Delaying the purchase by {plan['purchase_delay_weeks']} weeks and cutting discretionary spend."
+            }
+        return {
+            "plan_found": False,
+            "explanation": "Could not find a safe minimum-change plan."
+        }
     except ImportError:
         return {
             "plan_found": True,
             "resulting_shortfall_prob": 0.05,
             "explanation": "Delaying the purchase by 2 weeks and cutting Food/Shopping drops the shortfall chance to 5%."
         }
+
