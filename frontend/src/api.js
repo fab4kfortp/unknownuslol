@@ -19,8 +19,10 @@ const ORIGIN  = _DEV ? _DEV_ORIGIN : _PROD_ORIGIN;
 const R1_BASE = `${ORIGIN}/api`;   // R1: /api/summary, /api/forecast, …
 const R2_BASE = ORIGIN;            // R2: /simulate, /twin/benchmark, …
 
-async function getJSON(base, path) {
-  const res = await fetch(`${base}${path}`);
+async function getJSON(base, path, sessionId) {
+  const res = await fetch(`${base}${path}`, {
+    headers: sessionId ? { "X-Session-ID": sessionId } : {},
+  });
   if (!res.ok) {
     throw new Error(`Request to ${path} failed: ${res.status} ${res.statusText}`);
   }
@@ -39,10 +41,36 @@ async function postJSON(base, path, body) {
   return res.json();
 }
 
+export async function uploadStatement(file, sessionId) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${R1_BASE}/upload`, {
+    method: "POST",
+    headers: { "X-Session-ID": sessionId },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function addLiveTransaction(transaction, sessionId) {
+  const res = await fetch(`${R1_BASE}/transactions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Session-ID": sessionId },
+    body: JSON.stringify(transaction),
+  });
+  if (!res.ok) throw new Error(`Live add failed: ${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export function downloadStatementTemplate() {
+  window.open(`${R1_BASE}/template`, "_blank", "noopener,noreferrer");
+}
+
 // -- Round 1 exports (R1_BASE → /api/…) --
-export const getSummary      = ()              => getJSON(R1_BASE, "/summary");
+export const getSummary      = (sessionId)     => getJSON(R1_BASE, "/summary", sessionId);
 export const getTrends       = ()              => getJSON(R1_BASE, "/trends");
-export const getRecurring    = ()              => getJSON(R1_BASE, "/recurring");
+export const getRecurring    = (sessionId)     => getJSON(R1_BASE, "/recurring", sessionId);
 export const getForecast     = (days = 30)     => getJSON(R1_BASE, `/forecast?forecast_days=${days}`);
 export const getTransactions = (limit = 50)    => getJSON(R1_BASE, `/transactions?limit=${limit}`);
 

@@ -12,8 +12,8 @@
 // goal planning), not faked screens.
 
 import { useEffect, useState } from "react";
-import { LayoutDashboard, Receipt, Repeat, LineChart, Target, Shuffle, FlaskConical, Sliders, MessageSquareText, Activity } from "lucide-react";
-import { getSummary, getTrends, getRecurring, getForecast, getTransactions } from "./api";
+import { LayoutDashboard, Receipt, Repeat, Upload, Shuffle, FlaskConical, Sliders, MessageSquareText, Activity } from "lucide-react";
+import { getSummary, getRecurring } from "./api";
 import Sidebar from "./components/Sidebar.jsx";
 import HealthMetrics from "./components/HealthMetrics.jsx";
 import RecurringTable from "./components/RecurringTable.jsx";
@@ -26,11 +26,13 @@ import BenchmarkScreen from "./components/BenchmarkScreen.jsx";
 import OptimizerScreen from "./components/OptimizerScreen.jsx";
 import ReviewQueueScreen from "./components/ReviewQueueScreen.jsx";
 import VerifiedAgentChat from "./components/VerifiedAgentChat.jsx";
+import UploadScreen from "./components/UploadScreen.jsx";
 
 const TABS = [
   { id: "dashboard",   label: "Dashboard",            icon: LayoutDashboard },
   { id: "transactions",label: "Transactions",         icon: Receipt },
   { id: "recurring",   label: "Recurring Payments",   icon: Repeat },
+  { id: "upload",      label: "Upload Data",          icon: Upload },
   { id: "simulate",    label: "Simulate a Decision",  icon: Shuffle },
   { id: "benchmark",   label: "Model Benchmark",      icon: FlaskConical },
   { id: "optimizer",   label: "Minimum-Change Plan",  icon: Sliders },
@@ -48,19 +50,31 @@ function App() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [slow, setSlow] = useState(false);
+  const [sessionId] = useState(() => {
+    const existing = window.localStorage.getItem("spendshield-session-id");
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    window.localStorage.setItem("spendshield-session-id", created);
+    return created;
+  });
 
   useEffect(() => {
-    Promise.all([getSummary(), getTrends(), getRecurring(), getForecast(), getTransactions(100)])
-      .then(([summaryData, trendsData, recurringData, forecastData, transactionsData]) => {
-        setSummary(summaryData);
-        setTrends(trendsData);
-        setRecurring(recurringData);
-        setForecast(forecastData);
-        setTransactions(transactionsData);
+    Promise.all([getSummary(sessionId), getRecurring(sessionId)])
+      .then(([summaryData, recurringData]) => {
+        const analysis = recurringData?.alerts ? recurringData : summaryData;
+        setSummary(Array.isArray(summaryData) ? summaryData : []);
+        setTrends({});
+        setRecurring({
+          payments: analysis?.recurring || [],
+          total_monthly_burden: 0,
+          alerts: analysis?.alerts || [],
+        });
+        setForecast(null);
+        setTransactions([]);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [sessionId]);
 
   // If the API takes a while (e.g. a cold-started server), say so instead of
   // leaving the user staring at a blank screen.
@@ -133,7 +147,7 @@ function App() {
             {activeTab === "dashboard" && (
               <>
                 <div className="mb-6">
-                  <AttentionPanel trends={trends} recurring={recurring} />
+                  <AttentionPanel alerts={recurring.alerts} />
                 </div>
 
                 <HealthMetrics latest={latest} trends={trends} recurringBurden={recurring.total_monthly_burden} />
@@ -161,6 +175,12 @@ function App() {
             {activeTab === "recurring" && (
               <div className="mb-8">
                 <RecurringTable payments={recurring.payments} />
+              </div>
+            )}
+
+            {activeTab === "upload" && (
+              <div className="mb-8">
+                <UploadScreen sessionId={sessionId} />
               </div>
             )}
 

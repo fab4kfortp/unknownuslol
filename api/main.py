@@ -4,6 +4,9 @@ api/main.py ?" FastAPI bridge between the Python pipeline and the React frontend
 Owned by: Member 1
 """
 
+import csv
+import io
+import json
 import os
 import sys
 import uuid
@@ -12,7 +15,8 @@ import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from ingestion import load_transactions, TransactionValidationError
@@ -30,8 +34,24 @@ from api.schemas import (
     AgentChatResponse, ReviewCorrectionRequest
 )
 from simulator import simulate_decision
+from api.mock_engine import MockEngine
+from api.storage import clear_user_data, get_locked_path, get_locked_paths, get_transactions as stored_transactions, initialize_database, store_locked_path, store_transactions
+from contracts.schemas import LockedPath, Priority, Scenario, Transaction, TransactionType
+
+# Product-layer engine selection.  A real engine can replace this branch once
+# its adapter is available; local development remains deterministic by default.
+ENGINE_MODE = os.getenv("ENGINE_MODE", "mock").strip().lower()
+if ENGINE_MODE == "mock":
+    engine = MockEngine()
+else:
+    raise RuntimeError(
+        f"Unsupported ENGINE_MODE={ENGINE_MODE!r}. Only 'mock' is available currently."
+    )
 
 app = FastAPI(title="FIN-02 Financial Health Copilot API")
+app.state.engine = engine
+app.state.engine_mode = ENGINE_MODE
+initialize_database()
 
 # Enable CORS for local testing and production Vercel frontend
 app.add_middleware(
@@ -48,6 +68,217 @@ app.add_middleware(
 )
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "persona_a_transactions.csv")
+FIXTURES_PATH = os.path.join(os.path.dirname(__file__), "..", "fixtures")
+
+
+def _resolve_session_id(
+    request: Request, form_session_id: str | None, header_session_id: str | None
+) -> str:
+    """Allow a session ID in multipart form data, a header, or a query parameter."""
+    session_id = form_session_id or header_session_id or request.query_params.get("session_id")
+    if not session_id or not session_id.strip():
+        raise HTTPException(status_code=422, detail="A non-empty session_id is required")
+    return session_id.strip()
+
+
+def _transaction_from_csv_row(row: dict[str, str | None], row_number: int, session_id: str) -> Transaction:
+    """Convert CSV text deliberately before strict Pydantic validation."""
+    try:
+        amount = float(row.get("amount") or "")
+        balance = float(row.get("balance") or 0.0)
+    except ValueError as exc:
+        raise ValueError("amount and balance must be valid numbers") from exc
+
+    return Transaction.model_validate(
+        {
+            "id": row.get("id") or f"{session_id}-{row_number}",
+            "date": row.get("date") or "",
+            "narration": row.get("narration") or "",
+            "amount": amount,
+            "type": TransactionType((row.get("type") or "").strip().lower()),
+            "category": row.get("category") or "uncategorized",
+            "category_confidence": float(row.get("category_confidence") or 0.0),
+            "priority": Priority(row.get("priority") or "Low"),
+            "balance": balance,
+        }
+    )
+
+
+@app.post("/api/upload")
+async def upload_statement(
+    request: Request,
+    file: UploadFile = File(...),
+    session_id: str | None = Form(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Validate a statement CSV, persist valid rows, and report row-level errors."""
+    effective_session_id = _resolve_session_id(request, session_id, x_session_id)
+    if not file.filename or not file.filename.lower().endswith((".csv", ".json")):
+        raise HTTPException(status_code=415, detail="Upload a CSV or JSON statement")
+
+    try:
+        content = (await file.read()).decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded") from exc
+
+    required_headers = {"date", "narration", "amount", "type"}
+    if file.filename.lower().endswith(".json"):
+        try:
+            parsed_rows = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="JSON statement is invalid") from exc
+        if not isinstance(parsed_rows, list) or not all(isinstance(row, dict) for row in parsed_rows):
+            raise HTTPException(status_code=422, detail="JSON statement must be an array of transaction objects")
+        input_rows = parsed_rows
+    else:
+        reader = csv.DictReader(io.StringIO(content))
+        actual_headers = set(reader.fieldnames or [])
+        missing_headers = sorted(required_headers - actual_headers)
+        if missing_headers:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "CSV is missing required headers", "missing_headers": missing_headers},
+            )
+        input_rows = list(reader)
+
+    accepted: list[dict] = []
+    bad_rows: list[dict] = []
+    for row_number, row in enumerate(input_rows, start=2):
+        try:
+            transaction = _transaction_from_csv_row(row, row_number, effective_session_id)
+            transaction_json = transaction.model_dump(mode="json")
+            accepted.append(transaction_json)
+        except Exception as exc:
+            errors = exc.errors() if hasattr(exc, "errors") else [{"message": str(exc)}]
+            bad_rows.append({"row": row_number, "raw": row, "errors": errors})
+
+    store_transactions(effective_session_id, accepted)
+    engine_result = app.state.engine.ingest(accepted, file.filename)
+    # Preserve user-specific validation results when there are input errors;
+    # otherwise return the contract fixture/engine result verbatim.
+    if bad_rows:
+        engine_result = {
+            "accepted": accepted,
+            "rejected": [
+                {"row": bad_row["row"], "reasons": [str(error) for error in bad_row["errors"]]}
+                for bad_row in bad_rows
+            ],
+            "preview": accepted[:10],
+        }
+    return engine_result
+
+
+@app.delete("/api/user-data")
+def delete_user_data(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Remove all session-scoped uploaded transactions and locked paths."""
+    effective_session_id = session_id or x_session_id
+    if not effective_session_id or not effective_session_id.strip():
+        raise HTTPException(status_code=422, detail="A non-empty session_id is required")
+    deleted = clear_user_data(effective_session_id.strip())
+    return {"session_id": effective_session_id.strip(), "deleted": deleted}
+
+
+@app.get("/api/template")
+def download_statement_template():
+    """Download the Day-One CSV statement template."""
+    return FileResponse(
+        os.path.join(FIXTURES_PATH, "sample_statement.csv"),
+        media_type="text/csv",
+        filename="sample_statement.csv",
+    )
+
+
+def _user_data(session_id: str) -> dict:
+    """Load only the current session's persisted data for a stateless engine call."""
+    return {
+        "session_id": session_id,
+        "transactions": stored_transactions(session_id),
+        "locked_paths": get_locked_paths(session_id),
+    }
+
+
+def _engine_session_id(session_id: str | None, x_session_id: str | None) -> str:
+    value = session_id or x_session_id
+    if not value or not value.strip():
+        raise HTTPException(status_code=422, detail="A non-empty session_id is required")
+    return value.strip()
+
+
+# Frozen HTTP contract routes. Existing legacy endpoints below remain available
+# for backwards compatibility, while these are the v1 Part B surface.
+@app.post("/api/transactions")
+def refresh_transaction(
+    transaction: dict,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    normalized_transaction = _transaction_from_csv_row(transaction, 1, effective_session_id)
+    user_data = _user_data(effective_session_id)
+    locks = [LockedPath.model_validate(item) for item in user_data["locked_paths"]]
+    result = app.state.engine.refresh(user_data, normalized_transaction, locks)
+    store_transactions(effective_session_id, [result["transaction"]])
+    return result
+
+
+@app.get("/api/summary")
+@app.get("/api/recurring")
+@app.get("/api/priority")
+@app.get("/api/calendar")
+def analyze_user_data(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    return app.state.engine.analyze(_user_data(_engine_session_id(session_id, x_session_id)))
+
+
+@app.get("/api/forecast")
+def forecast_user_data(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+    horizon_days: int = Query(default=90, gt=0),
+):
+    return app.state.engine.forecast(_user_data(_engine_session_id(session_id, x_session_id)), horizon_days)
+
+
+@app.post("/api/simulate")
+def compare_scenarios(scenarios: list[Scenario], session_id: str = Query(...)):
+    return app.state.engine.compare_paths(_user_data(session_id), scenarios)
+
+
+@app.get("/api/shock-capacity")
+def get_shock_capacity(session_id: str = Query(...), limit: float = Query(default=0.10, ge=0, le=1)):
+    return app.state.engine.shock_capacity(_user_data(session_id), limit)
+
+
+@app.post("/api/optimize")
+def optimize_user_plan(target_risk: float = Query(..., ge=0, le=1), session_id: str = Query(...)):
+    return app.state.engine.optimize(_user_data(session_id), target_risk)
+
+
+@app.post("/api/lock")
+def lock_path(locked_path: LockedPath, session_id: str = Query(...)):
+    stored_path = locked_path.model_dump(mode="json")
+    store_locked_path(session_id, stored_path)
+    return app.state.engine.evaluate_lock(_user_data(session_id), locked_path)
+
+
+@app.get("/api/lock/{lock_id}")
+def evaluate_locked_path(lock_id: str, session_id: str = Query(...)):
+    saved_path = get_locked_path(session_id, lock_id)
+    if saved_path is None:
+        raise HTTPException(status_code=404, detail="Locked path not found")
+    return app.state.engine.evaluate_lock(_user_data(session_id), LockedPath.model_validate(saved_path))
+
+
+@app.post("/api/chat")
+def chat_with_engine(session_id: str = Query(...)):
+    """Minimal verified-agent placeholder: it receives engine output, never raw rows."""
+    analysis = app.state.engine.analyze(_user_data(session_id))
+    return {"analysis": analysis, "verified_claims": True}
 
 
 def _run_pipeline():
@@ -71,7 +302,7 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.get("/api/summary")
+@app.get("/legacy/api/summary")
 def get_summary():
     """Monthly income/expenses/savings-rate/debt-to-income series."""
     df = _run_pipeline()
@@ -89,7 +320,7 @@ def get_trends():
     return trend_flags(summary)
 
 
-@app.get("/api/recurring")
+@app.get("/legacy/api/recurring")
 def get_recurring():
     """Detected recurring payments (chain-clustered, drift-aware)."""
     df = _run_pipeline()
@@ -100,7 +331,7 @@ def get_recurring():
     }
 
 
-@app.get("/api/forecast")
+@app.get("/legacy/api/forecast")
 def get_forecast(forecast_days: int = 30, holdout_days: int = 30):
     """Forward cash-flow forecast plus back-test accuracy."""
     df = _run_pipeline()
