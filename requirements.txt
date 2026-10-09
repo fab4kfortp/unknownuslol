@@ -1,5 +1,7 @@
 pandas
 numpy
+scipy
 scikit-learn
 fastapi
 uvicorn
+pydantic>=2
