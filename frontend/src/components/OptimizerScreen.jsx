@@ -107,7 +107,7 @@ function NumInput({ label, value, onChange, prefix = "₹", type = "number" }) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function OptimizerScreen() {
+export default function OptimizerScreen({ sessionId }) {
   // Form state
   const [goalName, setGoalName]       = useState("Buy a ₹90,000 laptop");
   const [amount, setAmount]           = useState(90000);
@@ -135,11 +135,12 @@ export default function OptimizerScreen() {
       constraints: {
         target_shortfall_prob: maxShortfall / 100,
         min_p10_buffer_amount: 0,
-        max_dti: 0.4,
+        max_dti: 0.5,
       },
+      category_weights: Object.fromEntries(cats.map((c) => [c.label, c.weight])),
     };
 
-    runOptimizer(payload)
+    runOptimizer(payload, sessionId)
       .then(setResult)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));

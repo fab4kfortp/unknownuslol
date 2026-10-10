@@ -94,9 +94,11 @@ class OptimizerConstraints(BaseModel):
 
 
 class OptimizerRequest(BaseModel):
-    target_purchase_amount: float
-    target_purchase_months: int
+    target_purchase_amount: float = 90000.0
+    target_purchase_months: int = 4
     constraints: OptimizerConstraints = Field(default_factory=OptimizerConstraints)
+    category_weights: Optional[Dict[str, float]] = None
+    flexibility_weights: Optional[Dict[str, float]] = None
 
     @model_validator(mode="before")
     @classmethod
