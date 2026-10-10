@@ -7,13 +7,14 @@
 //   R2 routes: FastAPI registers them as  POST /simulate  etc. (no /api prefix)
 //              → call with R2_BASE (bare origin)
 //
-// In dev (vite dev server on :5173) we point at the local backend on :8005.
+// In development, use Vite's same-origin proxy to the local backend. This
+// avoids browser cross-origin failures during login and API requests.
 // In production the Render deployment serves everything from one origin so
 // both bases resolve to the same host.
 
 const _DEV  = import.meta.env.DEV;
 const _PROD_ORIGIN = "https://spendshield-tj9v.onrender.com";
-const _DEV_ORIGIN  = "http://127.0.0.1:8000";
+const _DEV_ORIGIN  = "";
 
 const ORIGIN  = _DEV ? _DEV_ORIGIN : _PROD_ORIGIN;
 const R1_BASE = `${ORIGIN}/api`;   // R1: /api/summary, /api/forecast, …
