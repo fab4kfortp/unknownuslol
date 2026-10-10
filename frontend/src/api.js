@@ -57,6 +57,17 @@ export async function uploadStatement(file, sessionId) {
   return res.json();
 }
 
+export const getAASandboxInfo = () => getJSON(R1_BASE, "/aa/sandbox-info");
+
+export const createAAMockConsent = (payload, sessionId) =>
+  postJSON(R1_BASE, "/aa/consents", payload, sessionId);
+
+export const approveAAMockConsent = (consentId, sessionId) =>
+  postJSON(R1_BASE, `/aa/consents/${encodeURIComponent(consentId)}/approve`, {}, sessionId);
+
+export const revokeAAMockConsent = (consentId, sessionId) =>
+  postJSON(R1_BASE, `/aa/consents/${encodeURIComponent(consentId)}/revoke`, {}, sessionId);
+
 export async function addLiveTransaction(transaction, sessionId) {
   const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
   const res = await fetch(`${R1_BASE}/transactions?session_id=${encodeURIComponent(sid)}`, {

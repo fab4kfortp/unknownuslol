@@ -37,6 +37,7 @@ from api.schemas import (
     DataState, LiveTransactionRequest, LiveTransactionResponse, AgentChatRequest,
     AgentChatResponse, ReviewCorrectionRequest
 )
+from api.aa_ingestion import router as aa_router
 from simulator import simulate_decision
 from api.mock_engine import MockEngine
 from api.storage import clear_user_data, get_locked_path, get_locked_paths, get_transactions as stored_transactions, initialize_database, store_locked_path, store_transactions
@@ -56,6 +57,7 @@ app = FastAPI(title="FIN-02 Financial Health Copilot API")
 app.state.engine = engine
 app.state.engine_mode = ENGINE_MODE
 initialize_database()
+app.include_router(aa_router)
 
 # Enable CORS for local testing and production Vercel frontend
 app.add_middleware(
@@ -360,14 +362,90 @@ def get_api_recurring(
     }
 
 
+def _priority_for_expense(category: str, merchant: str) -> str:
+    text = f"{category} {merchant}".lower()
+    if any(term in text for term in ("emi", "loan", "debt", "credit card bill")):
+        return "Critical"
+    if any(term in text for term in ("rent", "housing", "utility", "electricity", "health", "hospital", "pharmacy")):
+        return "High"
+    if any(term in text for term in ("grocery", "transport", "fuel", "water", "gas")):
+        return "Medium"
+    return "Low"
+
+
+def _priority_calendar_data(session_id: str) -> dict[str, Any]:
+    """Build these dashboard views from the active session's cleaned transactions."""
+    df = _run_pipeline(session_id)
+    if df.empty:
+        return {"status": "insufficient_data", "priority_list": [], "recurring": [], "calendar": []}
+
+    debits = df[df["type"].astype(str).str.lower() == "debit"].copy()
+    if "is_duplicate" in debits.columns:
+        debits = debits[~debits["is_duplicate"].fillna(False).astype(bool)]
+    date_span = max(1, (pd.to_datetime(df["date"]).max() - pd.to_datetime(df["date"]).min()).days + 1)
+    months = max(1.0, date_span / 30.4375)
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for _, row in debits.iterrows():
+        category = str(row.get("category") or "Other")
+        merchant = str(row.get("merchant") or row.get("narration") or category)
+        priority = _priority_for_expense(category, merchant)
+        key = (priority, category)
+        item = grouped.setdefault(key, {"category": category, "priority": priority, "amount": 0.0, "transaction_count": 0})
+        item["amount"] += float(row["amount"])
+        item["transaction_count"] += 1
+
+    rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+    priority_list = sorted(grouped.values(), key=lambda item: (rank[item["priority"]], -item["amount"]))
+    for item in priority_list:
+        item["monthly_amount"] = round(item["amount"] / months, 2)
+        item["amount"] = round(item["amount"], 2)
+
+    recurring_df = detect_recurring_payments(df)
+    recurring = _clean_records(recurring_df) if not recurring_df.empty else []
+    today = pd.Timestamp.now().normalize()
+    calendar = []
+    for index, item in enumerate(recurring):
+        interval = max(1, int(round(float(item.get("avg_interval_days") or 30))))
+        last_seen = pd.to_datetime(item["last_seen"]).normalize()
+        due_date = last_seen + pd.Timedelta(days=interval)
+        while due_date < today:
+            due_date += pd.Timedelta(days=interval)
+        calendar.append({
+            "id": f"bill-{index}-{item.get('merchant', 'recurring')}",
+            "merchant": item.get("merchant", "Recurring payment"),
+            "category": item.get("recurring_type", "Bill"),
+            "amount": float(item.get("last_amount", item.get("avg_amount", 0)) or 0),
+            "last_seen": last_seen.date().isoformat(),
+            "next_due": due_date.date().isoformat(),
+            "priority": _priority_for_expense(str(item.get("recurring_type", "")), str(item.get("merchant", ""))),
+            "estimated": True,
+        })
+    calendar.sort(key=lambda item: item["next_due"])
+    return {
+        "status": "ok",
+        "priority_list": priority_list,
+        "payment_order": ["Critical", "High", "Medium", "Low"],
+        "recurring": recurring,
+        "calendar": calendar,
+    }
+
+
 @app.get("/api/priority")
-@app.get("/api/calendar")
-def analyze_user_data(
+def get_priority_list(
     session_id: str | None = Query(default=None),
     x_session_id: str | None = Header(default=None),
 ):
     effective_session_id = _engine_session_id(session_id, x_session_id)
-    return app.state.engine.analyze(_user_data(effective_session_id))
+    return _priority_calendar_data(effective_session_id)
+
+
+@app.get("/api/calendar")
+def get_bill_calendar(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    return _priority_calendar_data(effective_session_id)
 
 
 @app.get("/api/forecast")
@@ -825,6 +903,7 @@ def optimize_plan_endpoint(
         constraints = {
             "max_shortfall_prob": request.constraints.target_shortfall_prob,
             "max_dti": request.constraints.max_dti or 0.5,
+            "min_p10_buffer_amount": request.constraints.min_p10_buffer_amount,
         }
         target_months = max(1, request.target_purchase_months)
 

@@ -113,6 +113,7 @@ export default function OptimizerScreen({ sessionId }) {
   const [amount, setAmount]           = useState(90000);
   const [months, setMonths]           = useState(4);
   const [maxShortfall, setMaxShortfall] = useState(10); // in %
+  const [maxDti, setMaxDti]           = useState(65); // in %
   const [cats, setCats]               = useState(DEFAULT_CATS);
 
   // Result state
@@ -135,7 +136,7 @@ export default function OptimizerScreen({ sessionId }) {
       constraints: {
         target_shortfall_prob: maxShortfall / 100,
         min_p10_buffer_amount: 0,
-        max_dti: 0.5,
+        max_dti: maxDti / 100,
       },
       category_weights: Object.fromEntries(cats.map((c) => [c.label, c.weight])),
     };
@@ -158,6 +159,7 @@ export default function OptimizerScreen({ sessionId }) {
   ];
 
   const levers = result?.levers ?? null;
+  const hasSuggestion = Boolean(levers);
   const categoryEntries = levers?.cut_spend_percentages
     ? Object.entries(levers.cut_spend_percentages)
     : [];
@@ -195,6 +197,15 @@ export default function OptimizerScreen({ sessionId }) {
               min={1} max={40} step={1}
               value={maxShortfall}
               onChange={setMaxShortfall}
+              format={(v) => `${v}%`}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <SliderRow
+              label="Max debt-to-income ratio"
+              min={20} max={80} step={1}
+              value={maxDti}
+              onChange={setMaxDti}
               format={(v) => `${v}%`}
             />
           </div>
@@ -268,20 +279,22 @@ export default function OptimizerScreen({ sessionId }) {
                 )}
               </div>
             </div>
-          ) : (
+          ) : result.levers ? (
             <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4">
               <Info size={20} className="text-amber-500 mt-0.5 flex-shrink-0" />
               <div>
-                <p className="font-semibold text-navy text-sm">No plan found within constraints</p>
-                <p className="text-sm text-slate-600 mt-0.5">
-                  Try increasing the target months, relaxing the shortfall probability limit, or
-                  increasing category flexibility weights.
-                </p>
+                <p className="font-semibold text-navy text-sm">Closest available plan (constraint not met)</p>
+                <p className="text-sm text-slate-600 mt-0.5">{result.explanation || `This option has ${pct(result.resulting_shortfall_prob)} estimated shortfall risk against your ${maxShortfall}% limit. Adjust the goal or risk limit to explore alternatives.`}</p>
               </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+              <Info size={20} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <div><p className="font-semibold text-navy text-sm">No usable option could be calculated</p><p className="text-sm text-slate-600 mt-0.5">{result.explanation || "Try a smaller target amount or a longer purchase timeline."}</p></div>
             </div>
           )}
 
-          {result.plan_found && levers && (
+          {hasSuggestion && (
             <>
               {/* ── Lever Cards ── */}
               <div>

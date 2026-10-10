@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { AlertCircle, CheckCircle2, Download, Trash2, Upload } from "lucide-react";
-import { addLiveTransaction, deleteUserData, downloadStatementTemplate, uploadStatement } from "../api";
+import { useEffect, useState } from "react";
+import { AlertCircle, CheckCircle2, Download, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { addLiveTransaction, approveAAMockConsent, createAAMockConsent, deleteUserData, downloadStatementTemplate, getAASandboxInfo, revokeAAMockConsent, uploadStatement } from "../api";
 
 const initialTransaction = { date: "", narration: "", amount: "", type: "debit" };
 
@@ -19,6 +19,26 @@ function UploadScreen({ sessionId }) {
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteMsg, setDeleteMsg] = useState("");
+  const [sandboxInfo, setSandboxInfo] = useState(null);
+  const [aaPurpose, setAaPurpose] = useState("Review my cash flow in SpendShield");
+  const [aaFrom, setAaFrom] = useState("2026-07-01");
+  const [aaTo, setAaTo] = useState("2026-09-28");
+  const [aaConsent, setAaConsent] = useState(null);
+  const [aaBusy, setAaBusy] = useState(false);
+  const [aaError, setAaError] = useState("");
+  const [aaMessage, setAaMessage] = useState("");
+
+  useEffect(() => {
+    getAASandboxInfo()
+      .then((info) => {
+        setSandboxInfo(info);
+        if (info.data_from && info.data_to) {
+          setAaFrom(info.data_from);
+          setAaTo(info.data_to);
+        }
+      })
+      .catch((error) => setAaError(error.message));
+  }, []);
 
   const accepted = uploadResult?.accepted || [];
   const badRows = uploadResult?.rejected || uploadResult?.bad_rows || [];
@@ -69,8 +89,106 @@ function UploadScreen({ sessionId }) {
     }
   }
 
+  async function handleRequestMockConsent(event) {
+    event.preventDefault();
+    setAaBusy(true);
+    setAaError("");
+    setAaMessage("");
+    try {
+      const consent = await createAAMockConsent({
+        purpose: aaPurpose,
+        data_from: aaFrom || null,
+        data_to: aaTo || null,
+      }, sessionId);
+      setAaConsent(consent);
+    } catch (error) {
+      setAaError(error.message);
+    } finally {
+      setAaBusy(false);
+    }
+  }
+
+  async function handleApproveMockConsent() {
+    if (!aaConsent) return;
+    setAaBusy(true);
+    setAaError("");
+    setAaMessage("");
+    try {
+      const result = await approveAAMockConsent(aaConsent.consent_id, sessionId);
+      setAaConsent(result.consent);
+      setAaMessage(`${result.imported_count} sandbox/test transactions were added to this session.`);
+    } catch (error) {
+      setAaError(error.message);
+    } finally {
+      setAaBusy(false);
+    }
+  }
+
+  async function handleRevokeMockConsent() {
+    if (!aaConsent) return;
+    setAaBusy(true);
+    setAaError("");
+    try {
+      const consent = await revokeAAMockConsent(aaConsent.consent_id, sessionId);
+      setAaConsent(consent);
+      setAaMessage("Mock consent revoked. No further sandbox import can use this consent.");
+    } catch (error) {
+      setAaError(error.message);
+    } finally {
+      setAaBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
+      <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-6">
+        <div className="flex items-start gap-3">
+          <div className="rounded-lg bg-emerald-50 p-2 text-emerald-700"><ShieldCheck size={20} /></div>
+          <div>
+            <h2 className="text-xl font-semibold text-navy">Account Aggregator consent (Mock consent)</h2>
+            <p className="mt-1 text-sm text-slate-600">Sandbox / test data only. This does not connect to a bank or any real Account Aggregator.</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {sandboxInfo?.available
+                ? `${sandboxInfo.transaction_count} bundled test transactions, dated ${sandboxInfo.data_from} to ${sandboxInfo.data_to}.`
+                : "Checking local sandbox fixture…"}
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleRequestMockConsent} className="mt-5 grid gap-3 sm:grid-cols-3">
+          <label className="text-sm font-medium text-slate-600 sm:col-span-3">Purpose
+            <input required minLength="5" maxLength="200" value={aaPurpose} onChange={(event) => setAaPurpose(event.target.value)} className="mt-1 block w-full rounded-lg border border-cardborder px-3 py-2" />
+          </label>
+          <label className="text-sm font-medium text-slate-600">From date<input type="date" value={aaFrom} onChange={(event) => setAaFrom(event.target.value)} className="mt-1 block w-full rounded-lg border border-cardborder px-3 py-2" /></label>
+          <label className="text-sm font-medium text-slate-600">To date<input type="date" value={aaTo} onChange={(event) => setAaTo(event.target.value)} className="mt-1 block w-full rounded-lg border border-cardborder px-3 py-2" /></label>
+          <button type="submit" disabled={aaBusy || !sandboxInfo?.available} className="self-end rounded-lg border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">
+            {aaBusy ? "Requesting…" : "Request mock consent"}
+          </button>
+        </form>
+
+        {aaConsent && (
+          <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50/70 p-4">
+            <p className="text-sm font-semibold text-emerald-900">Consent status: {aaConsent.consent_status}</p>
+            <p className="mt-1 text-xs text-emerald-800">Purpose: {aaConsent.purpose}. Data: transactions from {aaConsent.data_from || "all fixture dates"} to {aaConsent.data_to || "all fixture dates"}.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {aaConsent.consent_status === "pending" && (
+                <button type="button" onClick={handleApproveMockConsent} disabled={aaBusy} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                  {aaBusy ? "Importing…" : "Approve mock consent and import test data"}
+                </button>
+              )}
+              {aaConsent.consent_status !== "revoked" && (
+                <button type="button" onClick={handleRevokeMockConsent} disabled={aaBusy} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50">
+                  Revoke mock consent
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {aaMessage && <p className="mt-3 text-sm text-emerald-700">{aaMessage}</p>}
+        {aaError && <p className="mt-3 text-sm text-risk">{aaError}</p>}
+        <p className="mt-3 text-xs text-slate-500">Imported test transactions remain in this session until you delete its data below. Revoking consent stops this consent from importing again.</p>
+      </section>
+
       <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>

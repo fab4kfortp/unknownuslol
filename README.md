@@ -34,3 +34,36 @@ To ensure our active-learning ML models and personas are built on empirical trut
 ### Round 2 Integration Complete
 - **Member 2 Integration**: The Quantile GBDT Twin Model (`src/twin/`), minimum-change optimizer (`src/optimizer.py`), and advanced recurring detector (`src/recurring_detector.py`) have been fully integrated into `api/main.py`.
 - **Member 1 UI**: The backend is flawlessly connected to the `ReviewQueueScreen`, `BenchmarkScreen`, `OptimizerScreen`, and `VerifiedAgentChat` React components. All systems are live.
+
+## Account Aggregator-style ingestion (Mock consent)
+
+The Upload Data screen includes a local consent demonstration. It does **not**
+connect to a bank, an Account Aggregator, or any external service. After you
+create and explicitly approve a consent, the backend imports only the bundled
+`fixtures/sample_statement.csv` rows covered by the selected date window. API
+responses and the screen identify the source as `Sandbox / test data`.
+
+Available routes:
+
+- `GET /api/aa/sandbox-info` reports the local fixture's date range and row count.
+- `POST /api/aa/consents` creates a pending mock consent (`purpose`, optional
+  `data_from` and `data_to` dates); no transaction rows are imported yet.
+- `POST /api/aa/consents/{consent_id}/approve` approves it and imports matching
+  fixture rows into the session identified by `X-Session-ID` (or `session_id`).
+- `GET /api/aa/consents` and `GET /api/aa/consents/{consent_id}` read that
+  session's consent records.
+- `POST /api/aa/consents/{consent_id}/revoke` revokes the mock consent and
+  blocks later imports through it. Already imported rows remain in the session
+  until the user deletes session data.
+
+Provider-specific request/response fields are intentionally not implemented.
+`api/aa_ingestion.py` marks the adapter location where mapping must be based on
+the selected provider's published documentation. This demo uses no secrets and
+makes no network calls.
+
+Run the focused backend checks with:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q tests/test_aa_ingestion.py
+```
