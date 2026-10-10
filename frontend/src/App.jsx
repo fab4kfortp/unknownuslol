@@ -12,7 +12,7 @@
 // goal planning), not faked screens.
 
 import { useEffect, useState } from "react";
-import { LayoutDashboard, Receipt, Repeat, Upload, Shuffle, FlaskConical, Sliders, MessageSquareText, Activity, CalendarDays, ListChecks, LockKeyhole } from "lucide-react";
+import { LayoutDashboard, Receipt, Repeat, Upload, Shuffle, FlaskConical, Sliders, MessageSquareText, Activity, CalendarDays, ListChecks, LockKeyhole, Sparkles, TrendingUp } from "lucide-react";
 import { getSummary, getRecurring, getTransactions, getForecast } from "./api";
 import Sidebar from "./components/Sidebar.jsx";
 import HealthMetrics from "./components/HealthMetrics.jsx";
@@ -30,6 +30,8 @@ import UploadScreen from "./components/UploadScreen.jsx";
 import PriorityCalendarScreen from "./components/PriorityCalendarScreen.jsx";
 import LockPathScreen from "./components/LockPathScreen.jsx";
 import StartScreen from "./components/StartScreen.jsx";
+import PlanScreen from "./components/PlanScreen.jsx";
+import ForecastScreen from "./components/ForecastScreen.jsx";
 
 const TABS = [
   { id: "dashboard",   label: "Dashboard",            icon: LayoutDashboard },
@@ -37,6 +39,8 @@ const TABS = [
   { id: "recurring",   label: "Recurring Payments",   icon: Repeat },
   { id: "priority",    label: "Priority List",        icon: ListChecks },
   { id: "calendar",    label: "Bill Calendar",         icon: CalendarDays },
+  { id: "plan",        label: "Priority LP Plan",     icon: Sparkles },
+  { id: "forecast",    label: "Forecast Evidence",    icon: TrendingUp },
   { id: "upload",      label: "Upload Data",          icon: Upload },
   { id: "simulate",    label: "Simulate a Decision",  icon: Shuffle },
   { id: "lock",        label: "Lock a Path",           icon: LockKeyhole },
@@ -238,7 +242,7 @@ function App() {
                   <h2 className="text-xl font-semibold text-slate-700 mb-3">
                     Cash Flow — Observed vs. Predicted
                   </h2>
-                  <ForecastChart summary={summary} forecast={forecast} />
+                  <ForecastChart summary={summary} forecast={forecast} sessionId={sessionId} />
                 </section>
 
                 <section className="mt-8 mb-8">
@@ -298,6 +302,18 @@ function App() {
             {activeTab === "review" && (
               <div className="mb-8">
                 <ReviewQueueScreen sessionId={sessionId} />
+              </div>
+            )}
+
+            {activeTab === "plan" && (
+              <div className="mb-8">
+                <PlanScreen sessionId={sessionId} />
+              </div>
+            )}
+
+            {activeTab === "forecast" && (
+              <div className="mb-8">
+                <ForecastScreen sessionId={sessionId} />
               </div>
             )}
           </div>

@@ -186,3 +186,29 @@ export const fetchCalibration = (sessionId) => {
   return getJSON(R2_BASE, `/calibration?session_id=${encodeURIComponent(sid)}`, sid);
 };
 
+export const fetchForecastReport = (sessionId, horizonWeeks = 8, view = "weekly") => {
+  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  return getJSON(R1_BASE, `/forecast-report?session_id=${encodeURIComponent(sid)}&horizon_weeks=${horizonWeeks}&view=${encodeURIComponent(view)}`, sid);
+};
+
+export const fetchPlan = (reserve = 0, goal = 0, view = "weekly", sessionId) => {
+  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  return getJSON(R1_BASE, `/plan?reserve=${encodeURIComponent(reserve)}&goal=${encodeURIComponent(goal)}&view=${encodeURIComponent(view)}&session_id=${encodeURIComponent(sid)}`, sid);
+};
+
+export const submitPlan = (payload, sessionId) => {
+  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  return postJSON(R1_BASE, `/plan?session_id=${encodeURIComponent(sid)}`, payload, sid);
+};
+
+export const submitReplan = (payload, sessionId) => {
+  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  return postJSON(R1_BASE, `/replan?session_id=${encodeURIComponent(sid)}`, payload, sid);
+};
+
+export const fetchEvidencePack = (sessionId) => {
+  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  return getJSON(R1_BASE, `/evidence-pack?session_id=${encodeURIComponent(sid)}`, sid);
+};
+
+
