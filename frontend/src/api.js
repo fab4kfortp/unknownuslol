@@ -19,9 +19,51 @@ const ORIGIN  = _DEV ? _DEV_ORIGIN : _PROD_ORIGIN;
 const R1_BASE = `${ORIGIN}/api`;   // R1: /api/summary, /api/forecast, …
 const R2_BASE = ORIGIN;            // R2: /simulate, /twin/benchmark, …
 
+const authHeaders = (headers = {}) => {
+  const accessToken = typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-access-token") : "";
+  return { ...headers, ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) };
+};
+
+async function apiFetch(url, options = {}) {
+  const response = await fetch(url, options);
+  if (response.status === 401 && typeof window !== "undefined") {
+    window.dispatchEvent(new Event("spendshield-auth-expired"));
+  }
+  return response;
+}
+
+async function authRequest(path, payload) {
+  const res = await fetch(`${R1_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(result.detail || `Authentication request failed: ${res.status}`);
+  return result;
+}
+
+export const registerAccount = (payload) => authRequest("/auth/register", payload);
+export const loginAccount = (payload) => authRequest("/auth/login", payload);
+
+export async function getCurrentUser() {
+  const res = await apiFetch(`${R1_BASE}/auth/me`, { headers: authHeaders() });
+  if (!res.ok) throw new Error("Your sign-in has expired. Please sign in again.");
+  return res.json();
+}
+
+export async function logoutAccount() {
+  try {
+    await apiFetch(`${R1_BASE}/auth/logout`, { method: "POST", headers: authHeaders() });
+  } finally {
+    window.sessionStorage.removeItem("spendshield-access-token");
+    window.sessionStorage.removeItem("spendshield-session-id");
+  }
+}
+
 async function getJSON(base, path, sessionId) {
-  const res = await fetch(`${base}${path}`, {
-    headers: sessionId ? { "X-Session-ID": sessionId } : {},
+  const res = await apiFetch(`${base}${path}`, {
+    headers: authHeaders(sessionId ? { "X-Session-ID": sessionId } : {}),
   });
   if (!res.ok) {
     throw new Error(`Request to ${path} failed: ${res.status} ${res.statusText}`);
@@ -30,13 +72,13 @@ async function getJSON(base, path, sessionId) {
 }
 
 async function postJSON(base, path, body, sessionId) {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "");
-  const res = await fetch(`${base}${path}`, {
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
+  const res = await apiFetch(`${base}${path}`, {
     method: "POST",
-    headers: {
+    headers: authHeaders({
       "Content-Type": "application/json",
       ...(sid ? { "X-Session-ID": sid } : {}),
-    },
+    }),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -48,9 +90,9 @@ async function postJSON(base, path, body, sessionId) {
 export async function uploadStatement(file, sessionId) {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${R1_BASE}/upload`, {
+  const res = await apiFetch(`${R1_BASE}/upload`, {
     method: "POST",
-    headers: { "X-Session-ID": sessionId },
+    headers: authHeaders({ "X-Session-ID": sessionId }),
     body: form,
   });
   if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText}`);
@@ -69,10 +111,10 @@ export const revokeAAMockConsent = (consentId, sessionId) =>
   postJSON(R1_BASE, `/aa/consents/${encodeURIComponent(consentId)}/revoke`, {}, sessionId);
 
 export async function addLiveTransaction(transaction, sessionId) {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
-  const res = await fetch(`${R1_BASE}/transactions?session_id=${encodeURIComponent(sid)}`, {
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
+  const res = await apiFetch(`${R1_BASE}/transactions?session_id=${encodeURIComponent(sid)}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Session-ID": sid },
+    headers: authHeaders({ "Content-Type": "application/json", "X-Session-ID": sid }),
     body: JSON.stringify(transaction),
   });
   if (!res.ok) throw new Error(`Live add failed: ${res.status} ${res.statusText}`);
@@ -80,36 +122,48 @@ export async function addLiveTransaction(transaction, sessionId) {
 }
 
 export function downloadStatementTemplate() {
-  window.open(`${R1_BASE}/template`, "_blank", "noopener,noreferrer");
+  apiFetch(`${R1_BASE}/template`, { headers: authHeaders() })
+    .then((res) => {
+      if (!res.ok) throw new Error("Could not download the statement template");
+      return res.blob();
+    })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "sample_statement.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    });
 }
 
 export async function deleteUserData(sessionId) {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
-  const res = await fetch(`${R1_BASE}/user-data?session_id=${encodeURIComponent(sid)}`, {
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
+  const res = await apiFetch(`${R1_BASE}/user-data?session_id=${encodeURIComponent(sid)}`, {
     method: "DELETE",
-    headers: sid ? { "X-Session-ID": sid } : {},
+    headers: authHeaders(sid ? { "X-Session-ID": sid } : {}),
   });
   if (!res.ok) throw new Error(`Delete failed: ${res.status} ${res.statusText}`);
   return res.json();
 }
 
 export async function getShockCapacity(sessionId, limit = 0.1) {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
-  const res = await fetch(`${R1_BASE}/shock-capacity?limit=${limit}&session_id=${encodeURIComponent(sid)}`, {
-    headers: sid ? { "X-Session-ID": sid } : {},
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
+  const res = await apiFetch(`${R1_BASE}/shock-capacity?limit=${limit}&session_id=${encodeURIComponent(sid)}`, {
+    headers: authHeaders(sid ? { "X-Session-ID": sid } : {}),
   });
   if (!res.ok) throw new Error(`Shock Capacity request failed: ${res.status} ${res.statusText}`);
   return res.json();
 }
 
 export async function compareSimulationPaths(scenarios, sessionId) {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
-  const res = await fetch(`${R1_BASE}/simulate?session_id=${encodeURIComponent(sid)}`, {
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
+  const res = await apiFetch(`${R1_BASE}/simulate?session_id=${encodeURIComponent(sid)}`, {
     method: "POST",
-    headers: {
+    headers: authHeaders({
       "Content-Type": "application/json",
       ...(sid ? { "X-Session-ID": sid } : {}),
-    },
+    }),
     body: JSON.stringify(scenarios),
   });
   if (!res.ok) throw new Error(`Simulation request failed: ${res.status} ${res.statusText}`);
@@ -123,13 +177,13 @@ export const getPriorityList = (sessionId) => getJSON(R1_BASE, "/priority", sess
 export const getCalendar = (sessionId) => getJSON(R1_BASE, "/calendar", sessionId);
 
 export async function lockPath(path, sessionId) {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
-  const res = await fetch(`${R1_BASE}/lock?session_id=${encodeURIComponent(sid)}`, {
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
+  const res = await apiFetch(`${R1_BASE}/lock?session_id=${encodeURIComponent(sid)}`, {
     method: "POST",
-    headers: {
+    headers: authHeaders({
       "Content-Type": "application/json",
       "X-Session-ID": sid,
-    },
+    }),
     body: JSON.stringify(path),
   });
   if (!res.ok) throw new Error(`Lock request failed: ${res.status} ${res.statusText}`);
@@ -137,9 +191,9 @@ export async function lockPath(path, sessionId) {
 }
 
 export async function getLockedPath(lockId, sessionId) {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
-  const res = await fetch(`${R1_BASE}/lock/${encodeURIComponent(lockId)}?session_id=${encodeURIComponent(sid)}`, {
-    headers: { "X-Session-ID": sid },
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
+  const res = await apiFetch(`${R1_BASE}/lock/${encodeURIComponent(lockId)}?session_id=${encodeURIComponent(sid)}`, {
+    headers: authHeaders({ "X-Session-ID": sid }),
   });
   if (!res.ok) throw new Error(`Get locked path failed: ${res.status} ${res.statusText}`);
   return res.json();
@@ -151,74 +205,74 @@ export const getSummary      = (sessionId)     => getJSON(R1_BASE, "/summary", s
 export const getTrends       = ()              => getJSON(R1_BASE, "/trends");
 export const getRecurring    = (sessionId)     => getJSON(R1_BASE, "/recurring", sessionId);
 export const getForecast     = (days = 30, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "");
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R1_BASE, `/forecast?horizon_days=${days}&forecast_days=${days}`, sid);
 };
 export const getTransactions = (limit = 50, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R1_BASE, `/transactions?limit=${limit}&session_id=${encodeURIComponent(sid)}`, sid);
 };
 
 // -- Round 2 exports (R2_BASE → /simulate, /twin/…, …) --
 export const fetchSimulatePresets = (sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R2_BASE, `/simulate/presets?session_id=${encodeURIComponent(sid)}`, sid);
 };
 export const runSimulation = (payload, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return postJSON(R2_BASE, `/simulate?session_id=${encodeURIComponent(sid)}`, payload, sid);
 };
 export const fetchTwinBenchmark = (sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R2_BASE, `/twin/benchmark?session_id=${encodeURIComponent(sid)}`, sid);
 };
 export const runOptimizer = (payload, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return postJSON(R2_BASE, `/optimize?session_id=${encodeURIComponent(sid)}`, payload, sid);
 };
 export const fetchReviewQueue = (sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R2_BASE, `/categoriser/review-queue?session_id=${encodeURIComponent(sid)}`, sid);
 };
 export const submitCategoryCorrection = (payload, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return postJSON(R2_BASE, `/categoriser/correct?session_id=${encodeURIComponent(sid)}`, payload, sid);
 };
 export const submitTransaction = (payload, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return postJSON(R2_BASE, `/transactions?session_id=${encodeURIComponent(sid)}`, payload, sid);
 };
 export const sendAgentChat = (payload, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return postJSON(R2_BASE, `/agent/chat?session_id=${encodeURIComponent(sid)}`, payload, sid);
 };
 export const fetchCalibration = (sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R2_BASE, `/calibration?session_id=${encodeURIComponent(sid)}`, sid);
 };
 
 export const fetchForecastReport = (sessionId, horizonWeeks = 8, view = "weekly") => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R1_BASE, `/forecast-report?session_id=${encodeURIComponent(sid)}&horizon_weeks=${horizonWeeks}&view=${encodeURIComponent(view)}`, sid);
 };
 
 export const fetchPlan = (reserve = 0, goal = 0, view = "weekly", sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R1_BASE, `/plan?reserve=${encodeURIComponent(reserve)}&goal=${encodeURIComponent(goal)}&view=${encodeURIComponent(view)}&session_id=${encodeURIComponent(sid)}`, sid);
 };
 
 export const submitPlan = (payload, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return postJSON(R1_BASE, `/plan?session_id=${encodeURIComponent(sid)}`, payload, sid);
 };
 
 export const submitReplan = (payload, sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return postJSON(R1_BASE, `/replan?session_id=${encodeURIComponent(sid)}`, payload, sid);
 };
 
 export const fetchEvidencePack = (sessionId) => {
-  const sid = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const sid = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   return getJSON(R1_BASE, `/evidence-pack?session_id=${encodeURIComponent(sid)}`, sid);
 };
 

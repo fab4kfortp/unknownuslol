@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { LayoutDashboard, Receipt, Repeat, Upload, Shuffle, FlaskConical, Sliders, MessageSquareText, Activity, CalendarDays, ListChecks, LockKeyhole, Sparkles, TrendingUp } from "lucide-react";
-import { getSummary, getRecurring, getTransactions, getForecast } from "./api";
+import { getSummary, getRecurring, getTransactions, getForecast, getCurrentUser, logoutAccount } from "./api";
 import Sidebar from "./components/Sidebar.jsx";
 import HealthMetrics from "./components/HealthMetrics.jsx";
 import RecurringTable from "./components/RecurringTable.jsx";
@@ -32,6 +32,7 @@ import LockPathScreen from "./components/LockPathScreen.jsx";
 import StartScreen from "./components/StartScreen.jsx";
 import PlanScreen from "./components/PlanScreen.jsx";
 import ForecastScreen from "./components/ForecastScreen.jsx";
+import LoginScreen from "./components/LoginScreen.jsx";
 
 const TABS = [
   { id: "dashboard",   label: "Dashboard",            icon: LayoutDashboard },
@@ -51,6 +52,8 @@ const TABS = [
 ];
 
 function App() {
+  const [authToken, setAuthToken] = useState(() => window.sessionStorage.getItem("spendshield-access-token") || "");
+  const [authReady, setAuthReady] = useState(false);
   const [hasStarted, setHasStarted] = useState(() => {
     return window.localStorage.getItem("spendshield-started") === "true";
   });
@@ -67,19 +70,87 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [slow, setSlow] = useState(false);
   const [sessionId, setSessionId] = useState(() => {
-    const existing = window.localStorage.getItem("spendshield-session-id");
-    if (existing) return existing;
-    const created = "demo";
-    window.localStorage.setItem("spendshield-session-id", created);
-    return created;
+    return window.sessionStorage.getItem("spendshield-session-id") || "";
   });
+  const [accountSessionId, setAccountSessionId] = useState("");
+  const [demoSessionId, setDemoSessionId] = useState("");
+
+  useEffect(() => {
+    if (!authToken) {
+      setAuthReady(true);
+      return;
+    }
+    getCurrentUser()
+      .then((identity) => {
+        setAccountSessionId(identity.session_id);
+        setDemoSessionId(identity.demo_session_id);
+        const activeSession = window.localStorage.getItem("spendshield-mode") === "demo"
+          ? identity.demo_session_id
+          : identity.session_id;
+        window.sessionStorage.setItem("spendshield-session-id", activeSession);
+        setSessionId(activeSession);
+      })
+      .catch(() => {
+        window.sessionStorage.removeItem("spendshield-access-token");
+        window.sessionStorage.removeItem("spendshield-session-id");
+        setAuthToken("");
+        setSessionId("");
+        setAccountSessionId("");
+        setDemoSessionId("");
+      })
+      .finally(() => setAuthReady(true));
+  }, []);
+
+  useEffect(() => {
+    const expireSession = () => {
+      window.sessionStorage.removeItem("spendshield-access-token");
+      window.sessionStorage.removeItem("spendshield-session-id");
+      setAuthToken("");
+      setSessionId("");
+      setAccountSessionId("");
+      setDemoSessionId("");
+      setHasStarted(false);
+      setError(null);
+      setAuthReady(true);
+    };
+    window.addEventListener("spendshield-auth-expired", expireSession);
+    return () => window.removeEventListener("spendshield-auth-expired", expireSession);
+  }, []);
+
+  const handleAuthenticated = (account) => {
+    window.sessionStorage.setItem("spendshield-access-token", account.access_token);
+    window.sessionStorage.setItem("spendshield-session-id", account.session_id);
+    window.localStorage.removeItem("spendshield-started");
+    setAuthToken(account.access_token);
+    setAccountSessionId(account.session_id);
+    setDemoSessionId(account.demo_session_id);
+    setSessionId(account.session_id);
+    setDataSourceMode("demo");
+    setHasStarted(false);
+    setAuthReady(true);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logoutAccount();
+    } finally {
+      window.localStorage.removeItem("spendshield-started");
+      window.localStorage.removeItem("spendshield-mode");
+      setAuthToken("");
+      setSessionId("");
+      setAccountSessionId("");
+      setDemoSessionId("");
+      setHasStarted(false);
+      setError(null);
+    }
+  };
 
   const handleSelectDemo = () => {
     window.localStorage.setItem("spendshield-started", "true");
     window.localStorage.setItem("spendshield-mode", "demo");
-    window.localStorage.setItem("spendshield-session-id", "demo");
+    window.sessionStorage.setItem("spendshield-session-id", demoSessionId);
     setDataSourceMode("demo");
-    setSessionId("demo");
+    setSessionId(demoSessionId);
     setHasStarted(true);
     setActiveTab("dashboard");
   };
@@ -88,12 +159,15 @@ function App() {
     window.localStorage.setItem("spendshield-started", "true");
     window.localStorage.setItem("spendshield-mode", "custom");
     setDataSourceMode("custom");
-    setSessionId(newSessionId);
+    const personalSession = newSessionId || accountSessionId;
+    window.sessionStorage.setItem("spendshield-session-id", personalSession);
+    setSessionId(personalSession);
     setHasStarted(true);
     setActiveTab("dashboard");
   };
 
   useEffect(() => {
+    if (!authToken || !sessionId) return;
     setLoading(true);
     setError(null);
     Promise.all([
@@ -132,7 +206,7 @@ function App() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [sessionId, dataSourceMode]);
+  }, [sessionId, dataSourceMode, authToken]);
 
   // If the API takes a while (e.g. a cold-started server), say so instead of
   // leaving the user staring at a blank screen.
@@ -141,11 +215,21 @@ function App() {
     return () => clearTimeout(t);
   }, []);
 
+  if (!authReady) {
+    return <div className="min-h-screen app-bg flex items-center justify-center text-slate-500">Checking your sign-in…</div>;
+  }
+
+  if (!authToken) {
+    return <LoginScreen onAuthenticated={handleAuthenticated} />;
+  }
+
   if (!hasStarted) {
     return (
       <StartScreen
+        sessionId={accountSessionId}
         onSelectDemo={handleSelectDemo}
         onUploadComplete={handleUploadComplete}
+        onLogout={handleLogout}
       />
     );
   }
@@ -191,14 +275,14 @@ function App() {
     <div className="min-h-screen app-bg flex">
       <Sidebar tabs={TABS} activeTab={activeTab} onSelect={setActiveTab} onSwitchMode={() => setHasStarted(false)} />
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-8 max-w-6xl mx-auto">
-          <header className="mb-6 relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0E2E28] via-[#14503F] to-[#1D7A5F] text-white p-7 shadow-xl shadow-emerald-900/20">
+      <main className="min-w-0 flex-1 overflow-y-auto pb-24 pt-14 md:pb-0 md:pt-0">
+        <div className="mx-auto max-w-6xl px-4 py-5 sm:p-6 md:p-8">
+          <header className="relative mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-[#0E2E28] via-[#14503F] to-[#1D7A5F] p-5 text-white shadow-xl shadow-emerald-900/20 sm:rounded-3xl sm:p-7">
             <img
               src="/logo-icon.png"
               alt=""
               aria-hidden="true"
-              className="absolute -right-8 -top-8 w-64 h-64 object-contain brightness-0 invert opacity-10 select-none pointer-events-none"
+              className="pointer-events-none absolute -right-10 -top-8 h-40 w-40 select-none object-contain opacity-10 brightness-0 invert sm:h-64 sm:w-64"
             />
             <div className="absolute -left-12 -bottom-20 w-72 h-72 rounded-full bg-emerald-400/20 blur-3xl pointer-events-none" />
             <div className="relative">
@@ -216,11 +300,18 @@ function App() {
                 >
                   ⚡ Switch Data / Demo
                 </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white px-3 py-1 text-xs font-semibold ring-1 ring-white/20 transition-all"
+                >
+                  Sign out
+                </button>
               </div>
-              <h1 className="mt-3 text-3xl font-display font-extrabold tracking-tight">
+              <h1 className="mt-3 text-2xl font-display font-extrabold tracking-tight sm:text-3xl">
                 {TABS.find((t) => t.id === activeTab)?.label}
               </h1>
-              <p className="mt-1.5 text-emerald-100/90">
+              <p className="mt-1.5 text-sm text-emerald-100/90 sm:text-base">
                 {greeting} 👋 {dataSourceMode === "demo" ? "Here's how Persona A is doing" : "Here is your active financial analysis"} —{" "}
                 {new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
               </p>
@@ -239,14 +330,14 @@ function App() {
                 <HealthMetrics latest={latest} trends={trends} recurringBurden={recurring.total_monthly_burden} />
 
                 <section className="mt-8">
-                  <h2 className="text-xl font-semibold text-slate-700 mb-3">
+                  <h2 className="mb-3 text-lg font-semibold text-slate-700 sm:text-xl">
                     Cash Flow — Observed vs. Predicted
                   </h2>
                   <ForecastChart summary={summary} forecast={forecast} sessionId={sessionId} />
                 </section>
 
                 <section className="mt-8 mb-8">
-                  <h2 className="text-xl font-semibold text-slate-700 mb-3">Recurring Payments</h2>
+                  <h2 className="mb-3 text-lg font-semibold text-slate-700 sm:text-xl">Recurring Payments</h2>
                   <RecurringTable payments={recurring.payments} />
                 </section>
               </>

@@ -12,10 +12,11 @@ import {
   Receipt,
   Repeat,
   Loader2,
+  LogOut,
 } from "lucide-react";
 import { downloadStatementTemplate, uploadStatement } from "../api";
 
-export default function StartScreen({ onSelectDemo, onUploadComplete }) {
+export default function StartScreen({ sessionId, onSelectDemo, onUploadComplete, onLogout }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -46,15 +47,13 @@ export default function StartScreen({ onSelectDemo, onUploadComplete }) {
     setUploading(true);
     setError("");
     try {
-      const newSessionId = crypto.randomUUID();
-      window.localStorage.setItem("spendshield-session-id", newSessionId);
-      const res = await uploadStatement(file, newSessionId);
+      const res = await uploadStatement(file, sessionId);
       if (res && res.accepted && res.accepted.length > 0) {
-        onUploadComplete(newSessionId, res);
+        onUploadComplete(sessionId, res);
       } else if (res && res.rejected && res.rejected.length > 0) {
         setError(`Upload had validation errors in ${res.rejected.length} rows. Please check file format.`);
       } else {
-        onUploadComplete(newSessionId, res);
+        onUploadComplete(sessionId, res);
       }
     } catch (err) {
       setError(err.message || "Failed to upload statement. Please ensure backend is running.");
@@ -64,9 +63,16 @@ export default function StartScreen({ onSelectDemo, onUploadComplete }) {
   };
 
   return (
-    <div className="min-h-screen app-bg flex flex-col justify-center items-center px-4 py-12">
+    <div className="min-h-screen app-bg flex flex-col justify-center items-center px-4 pb-8 pt-20 sm:py-12">
+      <button
+        type="button"
+        onClick={onLogout}
+        className="fixed right-3 top-3 z-10 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:border-emerald-400 hover:text-emerald-800 sm:right-5 sm:top-5 sm:px-4 sm:text-sm"
+      >
+        <LogOut size={16} /> Sign out
+      </button>
       {/* Brand Header */}
-      <div className="max-w-4xl w-full text-center mb-10">
+      <div className="mb-7 w-full max-w-4xl text-center sm:mb-10">
         <div className="inline-flex items-center justify-center gap-3 mb-4">
           <img src="/logo-icon.png" alt="SpendShield" className="w-14 h-14 object-contain drop-shadow" />
           <span className="text-3xl font-display font-black tracking-tight">
@@ -77,7 +83,7 @@ export default function StartScreen({ onSelectDemo, onUploadComplete }) {
           </span>
         </div>
 
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-navy tracking-tight">
+        <h1 className="text-2xl font-extrabold tracking-tight text-navy sm:text-4xl">
           Welcome to your Financial Health Copilot
         </h1>
         <p className="mt-3 text-slate-600 text-base max-w-xl mx-auto leading-relaxed">
@@ -87,10 +93,10 @@ export default function StartScreen({ onSelectDemo, onUploadComplete }) {
       </div>
 
       {/* Two Choice Cards */}
-      <div className="max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid w-full max-w-4xl grid-cols-1 gap-4 sm:gap-8 md:grid-cols-2">
         {/* OPTION 1: Interactive Demo */}
-        <div className="relative rounded-3xl border border-emerald-300/80 bg-white/90 backdrop-blur-md p-8 shadow-xl shadow-emerald-950/5 flex flex-col justify-between hover:border-emerald-500 transition-all">
-          <div className="absolute top-5 right-5">
+        <div className="relative flex flex-col justify-between rounded-3xl border border-emerald-300/80 bg-white/90 p-5 shadow-xl shadow-emerald-950/5 backdrop-blur-md transition-all hover:border-emerald-500 sm:p-8">
+          <div className="relative mb-4 flex justify-end sm:absolute sm:right-5 sm:top-5 sm:mb-0">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300">
               <Sparkles size={13} className="text-emerald-600" />
               Recommended for First Look
@@ -102,7 +108,7 @@ export default function StartScreen({ onSelectDemo, onUploadComplete }) {
               <TrendingUp size={24} />
             </div>
 
-            <h2 className="text-2xl font-bold text-navy">Interactive Demo</h2>
+            <h2 className="text-xl font-bold text-navy sm:text-2xl">Interactive Demo</h2>
             <p className="text-xs font-medium text-emerald-700 mt-0.5">
               Persona A · Synthetic data calibrated to RBI statistics
             </p>
@@ -145,8 +151,8 @@ export default function StartScreen({ onSelectDemo, onUploadComplete }) {
         </div>
 
         {/* OPTION 2: Upload Your Statement */}
-        <div className="relative rounded-3xl border border-cardborder bg-white/90 backdrop-blur-md p-8 shadow-xl shadow-slate-900/5 flex flex-col justify-between hover:border-slate-400 transition-all">
-          <div className="absolute top-5 right-5">
+        <div className="relative flex flex-col justify-between rounded-3xl border border-cardborder bg-white/90 p-5 shadow-xl shadow-slate-900/5 backdrop-blur-md transition-all hover:border-slate-400 sm:p-8">
+          <div className="relative mb-4 flex justify-end sm:absolute sm:right-5 sm:top-5 sm:mb-0">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 ring-1 ring-slate-200">
               <ShieldCheck size={13} className="text-slate-500" />
               Private & Session-Scoped
@@ -158,7 +164,7 @@ export default function StartScreen({ onSelectDemo, onUploadComplete }) {
               <Upload size={24} />
             </div>
 
-            <h2 className="text-2xl font-bold text-navy">Upload Your Statement</h2>
+            <h2 className="text-xl font-bold text-navy sm:text-2xl">Upload Your Statement</h2>
             <p className="text-xs font-medium text-slate-500 mt-0.5">
               Supports CSV & JSON bank statements
             </p>

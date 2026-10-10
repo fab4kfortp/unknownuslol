@@ -114,7 +114,7 @@ export default function PlanScreen({ sessionId = "demo" }) {
   return (
     <div className="space-y-6">
       {/* Header & Controls */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm sm:p-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -181,7 +181,7 @@ export default function PlanScreen({ sessionId = "demo" }) {
 
       {/* Infeasible Conflict Card */}
       {plan?.status === "infeasible" && plan.conflict && (
-        <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-4 shadow-sm space-y-4 sm:p-6">
           <div className="flex items-start gap-3">
             <AlertTriangle className="text-amber-600 mt-0.5 shrink-0" size={20} />
             <div>
@@ -264,7 +264,7 @@ export default function PlanScreen({ sessionId = "demo" }) {
 
       {/* Sequence Tabs */}
       {sequences.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-6 sm:p-6">
           <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-4 gap-3">
             <div className="flex items-center gap-2">
               {sequences.map((seq) => {

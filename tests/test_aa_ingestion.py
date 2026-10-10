@@ -2,13 +2,15 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from api.storage import clear_user_data, get_transactions
+from tests.auth_helpers import authenticated_client
 
 
-client = TestClient(app)
+client = authenticated_client()
+SESSION_ID = client.headers["X-Session-ID"]
 
 
 def test_mock_consent_requires_explicit_approval_and_imports_sandbox_rows():
-    session_id = "aa-consent-flow-test"
+    session_id = SESSION_ID
     clear_user_data(session_id)
 
     info = client.get("/api/aa/sandbox-info")
@@ -52,7 +54,7 @@ def test_mock_consent_requires_explicit_approval_and_imports_sandbox_rows():
 
 
 def test_mock_consent_validation_and_session_isolation():
-    session_id = "aa-consent-validation-test"
+    session_id = SESSION_ID
     clear_user_data(session_id)
 
     blank = client.post(
@@ -79,12 +81,12 @@ def test_mock_consent_validation_and_session_isolation():
     hidden = client.get(
         f"/api/aa/consents/{consent_id}", headers={"X-Session-ID": "different-session"}
     )
-    assert hidden.status_code == 404
+    assert hidden.status_code == 403
     clear_user_data(session_id)
 
 
 def test_mock_consent_can_be_revoked_and_does_not_claim_bank_connectivity():
-    session_id = "aa-consent-revoke-test"
+    session_id = SESSION_ID
     clear_user_data(session_id)
     created = client.post(
         "/api/aa/consents",

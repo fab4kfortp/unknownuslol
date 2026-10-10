@@ -471,7 +471,7 @@ export default function SimulateScreen({ sessionId }) {
   return (
     <div className="space-y-6">
       {/* ── 1. Shock Capacity Card ── */}
-      <section className="relative overflow-hidden rounded-3xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-white p-6 shadow-sm">
+      <section className="relative overflow-hidden rounded-3xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-white p-4 shadow-sm sm:p-6">
         <div className="absolute right-0 top-0 -mt-6 -mr-6 w-48 h-48 bg-emerald-200/30 rounded-full blur-2xl pointer-events-none" />
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative">
@@ -537,7 +537,7 @@ export default function SimulateScreen({ sessionId }) {
       </section>
 
       {/* ── 2. Scenario Presets & Path Slots Selector ── */}
-      <section className="rounded-3xl border border-cardborder bg-white p-6 shadow-sm">
+      <section className="rounded-3xl border border-cardborder bg-white p-4 shadow-sm sm:p-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100">
           <div>
             <div className="flex items-center gap-2">
@@ -723,7 +723,7 @@ export default function SimulateScreen({ sessionId }) {
 
       {/* ── 4. Recharts Visual Buffer Comparison Chart ── */}
       {!simulationLoading && sortedPaths.length > 0 && (
-        <section className="rounded-3xl border border-cardborder bg-white p-6 shadow-sm">
+        <section className="rounded-3xl border border-cardborder bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div>
               <h3 className="font-bold text-navy text-base">90-Day Buffer Quantiles (Recharts Comparison)</h3>

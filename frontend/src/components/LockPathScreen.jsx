@@ -3,7 +3,7 @@ import { LockKeyhole, ShieldCheck, AlertTriangle, ArrowRight, RefreshCw, Zap, Ch
 import { lockPath, getLockedPath, addLiveTransaction } from "../api";
 
 export default function LockPathScreen({ sessionId }) {
-  const activeSessionId = sessionId || (typeof window !== "undefined" ? window.localStorage.getItem("spendshield-session-id") : "") || "demo";
+  const activeSessionId = sessionId || (typeof window !== "undefined" ? window.sessionStorage.getItem("spendshield-session-id") : "");
   const [goal, setGoal] = useState("Emergency Reserve Fund");
   const [requiredBalance, setRequiredBalance] = useState("60000");
   const [deadline, setDeadline] = useState("2026-12-31");
@@ -92,7 +92,7 @@ export default function LockPathScreen({ sessionId }) {
   return (
     <div className="space-y-6 max-w-4xl">
       {/* Session Header / Explainer */}
-      <section className="rounded-2xl border border-cardborder bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-cardborder bg-white p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-accent/10 p-2.5 text-accent">
@@ -201,7 +201,7 @@ export default function LockPathScreen({ sessionId }) {
 
       {/* Result Section */}
       {result && (
-        <section className="rounded-2xl border border-cardborder bg-white p-6 shadow-sm space-y-5 animate-in fade-in duration-200">
+        <section className="rounded-2xl border border-cardborder bg-white p-4 shadow-sm space-y-5 animate-in fade-in duration-200 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div className="flex items-center gap-2 text-navy">
               <ShieldCheck className="w-5 h-5 text-emerald-600" />

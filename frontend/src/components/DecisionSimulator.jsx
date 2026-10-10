@@ -135,7 +135,7 @@ function PathCard({ path, isRecommended, priority }) {
       <p className="text-xs text-slate-500 leading-snug italic">{path.one_line_reason}</p>
 
       {/* Key metrics grid */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+      <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-x-4 gap-y-2 text-xs">
         <Metric label="90-day Shortfall Prob." value={`${shortfallPct}%`} highlight={path.shortfall_prob_90d > 0.35} />
         <Metric label="Survival Runway" value={`${path.survival_runway_days}d`} />
         <Metric label="P10 Buffer" value={fmt(path.buffer.p10)} />

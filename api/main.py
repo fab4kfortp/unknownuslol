@@ -11,6 +11,7 @@ import os
 import sys
 import uuid
 import datetime
+from urllib.parse import parse_qsl, urlencode
 from pathlib import Path
 from typing import Any
 import pandas as pd
@@ -20,7 +21,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from ingestion import load_transactions, TransactionValidationError
@@ -38,6 +39,7 @@ from api.schemas import (
     AgentChatResponse, ReviewCorrectionRequest
 )
 from api.aa_ingestion import router as aa_router
+from api.auth import authenticate_token, router as auth_router
 from simulator import simulate_decision
 from api.mock_engine import MockEngine
 from api.storage import clear_user_data, get_locked_path, get_locked_paths, get_transactions as stored_transactions, initialize_database, store_locked_path, store_transactions
@@ -57,7 +59,55 @@ app = FastAPI(title="FIN-02 Financial Health Copilot API")
 app.state.engine = engine
 app.state.engine_mode = ENGINE_MODE
 initialize_database()
+app.include_router(auth_router)
 app.include_router(aa_router)
+
+
+@app.middleware("http")
+async def require_authenticated_account(request: Request, call_next):
+    """Protect product/API routes and bind all session IDs to the bearer identity."""
+    public_paths = {"/api/auth/register", "/api/auth/login", "/api/health"}
+    if request.method == "OPTIONS" or request.url.path in public_paths:
+        return await call_next(request)
+
+    authenticated = authenticate_token(request.headers.get("authorization"))
+    if authenticated is None:
+        return JSONResponse(status_code=401, content={"detail": "Sign in to access SpendShield"})
+    identity, _token_hash = authenticated
+
+    query_items = parse_qsl(request.scope.get("query_string", b"").decode("latin-1"), keep_blank_values=True)
+    requested_sessions = [value for key, value in query_items if key == "session_id"]
+    header_session = request.headers.get("x-session-id")
+    allowed_sessions = {identity.session_id, identity.demo_session_id, "demo"}
+    if any(value.strip() not in allowed_sessions for value in requested_sessions) or (
+        header_session is not None and header_session.strip() not in allowed_sessions
+    ):
+        return JSONResponse(status_code=403, content={"detail": "This session does not belong to the signed-in account"})
+
+    # Legacy demo callers are safely scoped to the signed-in account instead
+    # of being allowed to read or modify a shared "demo" session.
+    request.scope["query_string"] = urlencode([
+        (key, identity.demo_session_id if key == "session_id" and value == "demo" else value)
+        for key, value in query_items
+    ]).encode("ascii")
+    header_rows = request.scope.get("headers", [])
+    has_session_header = any(key == b"x-session-id" for key, _value in header_rows)
+    effective_header = (
+        identity.demo_session_id if header_session == "demo"
+        else header_session if header_session in allowed_sessions
+        else identity.session_id
+    )
+    request.scope["headers"] = [
+        (key, effective_header.encode("utf-8") if key == b"x-session-id" else value)
+        for key, value in header_rows
+    ]
+    if not has_session_header:
+        request.scope["headers"].append((b"x-session-id", effective_header.encode("utf-8")))
+    request.__dict__.pop("headers", None)
+
+    request.state.auth_identity = identity
+    request.state.auth_session_id = identity.session_id
+    return await call_next(request)
 
 # Enable CORS for local testing and production Vercel frontend
 app.add_middleware(
@@ -99,6 +149,11 @@ def _resolve_session_id(
     request: Request, form_session_id: str | None, header_session_id: str | None
 ) -> str:
     """Allow a session ID in multipart form data, a header, or a query parameter."""
+    identity_session = getattr(request.state, "auth_session_id", None)
+    if identity_session:
+        if form_session_id and form_session_id.strip() not in {identity_session, "demo"}:
+            raise HTTPException(status_code=403, detail="This session does not belong to the signed-in account")
+        return identity_session
     session_id = form_session_id or header_session_id or request.query_params.get("session_id")
     if not session_id or not session_id.strip():
         return "demo"
@@ -721,9 +776,9 @@ def health_check():
 
 
 @app.get("/legacy/api/summary")
-def get_summary():
+def get_summary(request: Request):
     """Monthly income/expenses/savings-rate/debt-to-income series."""
-    df = _run_pipeline()
+    df = _run_pipeline(_engine_session_id(None, request.headers.get("x-session-id")))
     summary = monthly_summary(df)
     summary = summary.reset_index()
     summary["month"] = summary["month"].astype(str)
@@ -731,17 +786,17 @@ def get_summary():
 
 
 @app.get("/api/trends")
-def get_trends():
+def get_trends(request: Request):
     """Rule-based trend flags over the summary."""
-    df = _run_pipeline()
+    df = _run_pipeline(_engine_session_id(None, request.headers.get("x-session-id")))
     summary = monthly_summary(df)
     return trend_flags(summary)
 
 
 @app.get("/legacy/api/recurring")
-def get_recurring():
+def get_recurring(request: Request):
     """Detected recurring payments (chain-clustered, drift-aware)."""
-    df = _run_pipeline()
+    df = _run_pipeline(_engine_session_id(None, request.headers.get("x-session-id")))
     recurring = detect_recurring_payments(df)
     return {
         "payments": _clean_records(recurring),
@@ -750,9 +805,9 @@ def get_recurring():
 
 
 @app.get("/legacy/api/forecast")
-def get_forecast(forecast_days: int = 30, holdout_days: int = 30):
+def get_forecast(request: Request, forecast_days: int = 30, holdout_days: int = 30):
     """Forward cash-flow forecast plus back-test accuracy."""
-    df = _run_pipeline()
+    df = _run_pipeline(_engine_session_id(None, request.headers.get("x-session-id")))
     daily = compute_daily_net_cashflow(df)
 
     forward = forecast_forward(daily, forecast_days=forecast_days)

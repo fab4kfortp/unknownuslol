@@ -299,7 +299,7 @@ export default function OptimizerScreen({ sessionId }) {
               {/* ── Lever Cards ── */}
               <div>
                 <h3 className="font-semibold text-navy mb-3">Recommended Changes</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 md:grid-cols-4">
                   <LeverCard
                     icon={Calendar}
                     label="Delay purchase by"

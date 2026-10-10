@@ -1,5 +1,21 @@
 # SpendShield - Data Pipeline & M3 Infrastructure
 
+## Account login
+
+SpendShield now requires an account before opening the workspace. On the first
+visit, create an account with an email address and a password of at least 8
+characters; later visits use the same sign-in form. The backend hashes
+passwords with PBKDF2 and issues a revocable bearer token that expires after
+12 hours. Protected API requests are bound to the account's server-created
+session, so changing a `session_id` cannot expose another account's data.
+
+Tokens are held in browser session storage and are cleared when the user signs
+out or closes the tab. Local development uses SQLite for account and session
+records. Configure persistent protected storage and add rate limiting and
+account recovery before using this as a public production authentication
+service. Existing anonymous session data is not automatically assigned to a
+new account.
+
 This repository builds the SpendShield backend data pipelines and infrastructure.
 
 ## Data Lineage & Kaggle Datasets

@@ -37,7 +37,7 @@ export default function PriorityCalendarScreen({ sessionId, mode }) {
   }, [bills, month]);
   const Icon = mode === "priority" ? ListChecks : CalendarDays;
   return (
-    <section className="rounded-2xl border border-cardborder bg-white p-6 shadow-sm">
+    <section className="rounded-2xl border border-cardborder bg-white p-4 shadow-sm sm:p-6">
       <div className="flex items-center gap-2"><Icon className="text-accent" /><h2 className="text-xl font-semibold text-navy">{mode === "priority" ? "Priority List" : "Bill Calendar"}</h2></div>
       <p className="mt-1 text-sm text-slate-500">{mode === "priority" ? "Monthly spending grouped by payment urgency. Critical and essential costs appear first." : "Upcoming recurring payments estimated from your transaction history."}</p>
       {error && <p role="alert" className="mt-4 text-sm text-risk">Could not load this view: {error}</p>}
@@ -65,18 +65,19 @@ export default function PriorityCalendarScreen({ sessionId, mode }) {
             <h3 className="font-semibold text-navy">{month.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</h3>
             <button type="button" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded-lg border border-cardborder p-2 text-slate-600 hover:bg-slate-50"><ChevronRight size={18} /></button>
           </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <div key={day} className="py-2">{day}</div>)}</div>
+          <div className="grid grid-cols-7 gap-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-slate-400 sm:gap-1 sm:text-[11px]">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <div key={day} className="py-2">{day}</div>)}</div>
           <div className="grid grid-cols-7 gap-1">
             {calendarCells.map((cell, index) => cell ? (
-              <div key={dateKey(cell.date)} className={`min-h-20 rounded-lg border p-1.5 sm:min-h-24 sm:p-2 ${cell.bills.length ? "border-emerald-200 bg-emerald-50/60" : "border-slate-100 bg-white"}`}>
-                <span className="text-xs font-medium text-slate-600">{cell.date.getDate()}</span>
-                <div className="mt-1 space-y-1">{cell.bills.slice(0, 2).map((bill) => <div key={bill.id} title={`${bill.merchant}: ${money(bill.amount)}`} className="truncate rounded bg-white px-1 py-0.5 text-[10px] font-medium text-emerald-800">{bill.merchant}</div>)}</div>
+              <div key={dateKey(cell.date)} className={`min-h-14 overflow-hidden rounded-md border p-1 sm:min-h-24 sm:rounded-lg sm:p-2 ${cell.bills.length ? "border-emerald-200 bg-emerald-50/60" : "border-slate-100 bg-white"}`}>
+                <span className="text-[10px] font-medium text-slate-600 sm:text-xs">{cell.date.getDate()}</span>
+                {cell.bills.length > 0 && <span aria-label={`${cell.bills.length} bill${cell.bills.length === 1 ? "" : "s"}`} className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-600 sm:hidden" />}
+                <div className="mt-1 space-y-1">{cell.bills.slice(0, 2).map((bill) => <div key={bill.id} title={`${bill.merchant}: ${money(bill.amount)}`} className="hidden truncate rounded bg-white px-1 py-0.5 text-[10px] font-medium text-emerald-800 sm:block">{bill.merchant}</div>)}</div>
                 {cell.bills.length > 2 && <p className="text-[9px] text-slate-500">+{cell.bills.length - 2} more</p>}
               </div>
-            ) : <div key={`blank-${index}`} className="min-h-20 sm:min-h-24" />)}
+            ) : <div key={`blank-${index}`} className="min-h-14 sm:min-h-24" />)}
           </div>
           <p className="mt-3 text-xs text-slate-400">Due dates are estimates based on each payment’s recent interval.</p>
-          <div className="mt-5 divide-y divide-cardborder">{bills.filter((bill) => bill.next_due.startsWith(`${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`)).map((bill) => <div key={bill.id} className="flex items-center justify-between gap-3 py-3"><div><p className="font-medium text-navy">{bill.merchant}</p><p className="text-xs text-slate-500">{bill.category} · {new Date(`${bill.next_due}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</p></div><div className="text-right"><p className="text-sm font-semibold text-navy">{money(bill.amount)}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${PRIORITY_STYLES[bill.priority] || PRIORITY_STYLES.Medium}`}>{bill.priority}</span></div></div>)}</div>
+          <div className="mt-5 divide-y divide-cardborder">{bills.filter((bill) => bill.next_due.startsWith(`${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`)).map((bill) => <div key={bill.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><p className="break-words font-medium text-navy">{bill.merchant}</p><p className="text-xs text-slate-500">{bill.category} · {new Date(`${bill.next_due}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</p></div><div className="shrink-0 text-right"><p className="text-sm font-semibold text-navy">{money(bill.amount)}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${PRIORITY_STYLES[bill.priority] || PRIORITY_STYLES.Medium}`}>{bill.priority}</span></div></div>)}</div>
           {bills.length === 0 && <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No recurring bills detected yet. More transaction history helps identify monthly payments.</p>}
         </div>
       )}

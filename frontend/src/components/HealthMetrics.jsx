@@ -42,7 +42,7 @@ function MetricCard({ label, value, sublabel, tone = "neutral", icon: Icon }) {
     risk: "bg-risk/10 text-risk",
   };
   return (
-    <div className="bg-white rounded-[14px] border border-cardborder shadow-sm p-5 transition-all duration-150 hover:shadow-md hover:-translate-y-0.5">
+    <div className="bg-white rounded-[14px] border border-cardborder shadow-sm p-4 transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 sm:p-5">
       <div className="flex items-center justify-between mb-2">
         <p className="text-sm text-slate-500">{label}</p>
         {Icon && (
@@ -79,7 +79,7 @@ function HealthScoreDonut({ score }) {
   const color = score === null ? "#94A3B8" : score >= 65 ? "#16A34A" : score >= 40 ? "#D97706" : "#DC2626";
 
   return (
-    <div className="bg-white rounded-[14px] border border-cardborder shadow-sm p-5 flex items-center gap-5">
+    <div className="bg-white rounded-[14px] border border-cardborder shadow-sm p-4 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-5 sm:p-5">
       <svg width="100" height="100" viewBox="0 0 100 100" className="shrink-0">
         <circle cx="50" cy="50" r={radius} fill="none" stroke="#E7EDF4" strokeWidth="10" />
         <circle

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -47,8 +48,66 @@ def initialize_database() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_aa_mock_consents_session
                 ON aa_mock_consents(session_id);
+            CREATE TABLE IF NOT EXISTS auth_users (
+                user_id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_salt TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                session_id TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES auth_users(user_id) ON DELETE CASCADE,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_auth_tokens_expiry ON auth_tokens(expires_at);
             """
         )
+
+
+def create_auth_user(user_id: str, email: str, salt: str, password_hash: str, session_id: str, created_at: str) -> bool:
+    """Create an account; return False when the email already exists."""
+    try:
+        with _connect() as connection:
+            connection.execute(
+                "INSERT INTO auth_users(user_id, email, password_salt, password_hash, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, email, salt, password_hash, session_id, created_at),
+            )
+    except sqlite3.IntegrityError:
+        return False
+    return True
+
+
+def get_auth_user_by_email(email: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        row = connection.execute("SELECT * FROM auth_users WHERE email = ? COLLATE NOCASE", (email,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_auth_token(token_hash: str, user_id: str, expires_at: int) -> None:
+    with _connect() as connection:
+        connection.execute("DELETE FROM auth_tokens WHERE expires_at <= ?", (int(time.time()),))
+        connection.execute(
+            "INSERT INTO auth_tokens(token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+            (token_hash, user_id, expires_at),
+        )
+
+
+def get_auth_identity(token_hash: str, now: int) -> dict[str, str] | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT u.user_id, u.email, u.session_id FROM auth_tokens t "
+            "JOIN auth_users u ON u.user_id = t.user_id "
+            "WHERE t.token_hash = ? AND t.expires_at > ?",
+            (token_hash, now),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_auth_token(token_hash: str) -> None:
+    with _connect() as connection:
+        connection.execute("DELETE FROM auth_tokens WHERE token_hash = ?", (token_hash,))
 
 
 def store_transactions(session_id: str, transactions: Iterable[dict[str, Any]]) -> None:

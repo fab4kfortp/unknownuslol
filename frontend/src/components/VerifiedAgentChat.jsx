@@ -72,10 +72,10 @@ export default function VerifiedAgentChat({ sessionId }) {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-160px)] max-h-[800px] bg-white/70 backdrop-blur-md rounded-2xl border border-cardborder shadow-sm overflow-hidden flex-shrink-0">
+    <div className="flex h-[calc(100dvh-190px)] min-h-[420px] max-h-[800px] min-w-0 flex-shrink-0 flex-col overflow-hidden rounded-2xl border border-cardborder bg-white/70 shadow-sm backdrop-blur-md md:h-[calc(100vh-160px)]">
       
       {/* ── Header ── */}
-      <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
+      <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/50 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#1D604C] to-[#3FA873] flex items-center justify-center text-white shadow-sm">
             <Cpu size={20} />
@@ -85,17 +85,17 @@ export default function VerifiedAgentChat({ sessionId }) {
             <p className="text-xs text-slate-500 font-medium">Data-Safe • Claim Verifier Active</p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-100 text-xs font-semibold">
+        <div className="flex w-fit items-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
           <ShieldCheck size={14} /> Claim Verifier Online
         </div>
       </div>
 
       {/* ── Chat History ── */}
-      <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3 sm:gap-6 sm:p-6">
         {messages.map((msg, i) => (
           <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
             
-            <div className={`max-w-[80%] rounded-2xl px-5 py-3.5 ${
+            <div className={`max-w-[92%] break-words rounded-2xl px-4 py-3 sm:max-w-[80%] sm:px-5 sm:py-3.5 ${
               msg.role === "user" 
                 ? "bg-navy text-white rounded-tr-sm" 
                 : "bg-slate-100 text-navy border border-slate-200 rounded-tl-sm"
@@ -109,7 +109,7 @@ export default function VerifiedAgentChat({ sessionId }) {
 
             {/* Agent Metadata Panels */}
             {msg.role === "agent" && !msg.error && (msg.tools.length > 0 || msg.verified !== undefined) && (
-              <div className="mt-2 flex flex-col gap-2 max-w-[80%]">
+              <div className="mt-2 flex max-w-[92%] flex-col gap-2 sm:max-w-[80%]">
                 
                 {/* Tools Called */}
                 {msg.tools.length > 0 && (
@@ -172,7 +172,7 @@ export default function VerifiedAgentChat({ sessionId }) {
       </div>
 
       {/* ── Quick Suggestions ── */}
-      <div className="px-6 pb-3 flex flex-wrap gap-2">
+      <div className="flex gap-2 overflow-x-auto px-3 pb-3 sm:flex-wrap sm:px-6">
         {SUGGESTIONS.map(s => (
           <button
             key={s}
@@ -186,7 +186,7 @@ export default function VerifiedAgentChat({ sessionId }) {
       </div>
 
       {/* ── Input Area ── */}
-      <div className="px-6 pb-6 pt-2">
+      <div className="px-3 pb-4 pt-2 sm:px-6 sm:pb-6">
         <form 
           onSubmit={(e) => { e.preventDefault(); handleSend(input); }}
           className="relative flex items-center"

@@ -5,8 +5,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
 from fastapi.testclient import TestClient
 from api.main import app
+from tests.auth_helpers import authenticated_client
 
-client = TestClient(app)
+client = authenticated_client()
 
 def test_endpoints():
     print("Testing /simulate/presets...")

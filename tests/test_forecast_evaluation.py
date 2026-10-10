@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+from tests.auth_helpers import authenticated_client
 from contracts.schemas import ForecastReport
 from src.data_splits import (
     assert_no_test_leakage,
@@ -26,7 +27,7 @@ from src.probabilistic_forecast import (
 
 @pytest.fixture()
 def client():
-    return TestClient(app)
+    return authenticated_client()
 
 
 def test_stream_aggregation_preserves_cashflow_totals():

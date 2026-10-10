@@ -141,7 +141,7 @@ function UploadScreen({ sessionId }) {
 
   return (
     <div className="space-y-6">
-      <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-6">
+      <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-4 sm:p-6">
         <div className="flex items-start gap-3">
           <div className="rounded-lg bg-emerald-50 p-2 text-emerald-700"><ShieldCheck size={20} /></div>
           <div>
@@ -189,7 +189,7 @@ function UploadScreen({ sessionId }) {
         <p className="mt-3 text-xs text-slate-500">Imported test transactions remain in this session until you delete its data below. Revoking consent stops this consent from importing again.</p>
       </section>
 
-      <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-6">
+      <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-xl font-semibold text-navy">Upload a statement</h2>
@@ -221,7 +221,7 @@ function UploadScreen({ sessionId }) {
       </section>
 
       {uploadResult && (
-        <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-6">
+        <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-4 sm:p-6">
           <div className="flex items-center gap-2 text-healthy"><CheckCircle2 size={18} /><h2 className="font-semibold">Accepted transactions ({accepted.length})</h2></div>
           {accepted.length > 0 ? (
             <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b text-xs uppercase text-slate-500"><tr><th className="p-2">Date</th><th className="p-2">Narration</th><th className="p-2 text-right">Amount</th><th className="p-2">Type</th></tr></thead><tbody>{accepted.map((row) => <tr key={row.id} className="border-b border-cardborder"><td className="p-2 text-slate-500">{row.date}</td><td className="p-2 font-medium text-navy">{row.narration}</td><td className="p-2 text-right">{formatInr(row.amount)}</td><td className="p-2 capitalize">{row.type}</td></tr>)}</tbody></table></div>
@@ -236,7 +236,7 @@ function UploadScreen({ sessionId }) {
         </section>
       )}
 
-      <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-6">
+      <section className="bg-white rounded-[14px] border border-cardborder shadow-sm p-4 sm:p-6">
         <h2 className="text-xl font-semibold text-navy">Add a live transaction</h2>
         <p className="mt-1 text-sm text-slate-500">This refreshes the financial picture immediately for this session.</p>
         <form onSubmit={handleLiveAdd} className="mt-5 grid gap-4 sm:grid-cols-2">

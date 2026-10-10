@@ -54,7 +54,7 @@ function RecurringTable({ payments }) {
 
   return (
     <div className="bg-white rounded-[14px] border border-cardborder shadow-sm overflow-x-auto">
-      <table className="w-full text-sm text-left">
+      <table className="w-full min-w-[650px] text-left text-sm">
         <thead className="bg-canvas text-slate-500 uppercase text-xs">
           <tr>
             <th className="px-4 py-3">Merchant</th>

@@ -12,4 +12,7 @@ build/
 .vercel/
 *.zip
 *.log
+*.db
+*.sqlite
+*.sqlite3
 .DS_Store

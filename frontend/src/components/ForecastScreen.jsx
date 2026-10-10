@@ -46,7 +46,7 @@ export default function ForecastScreen({ sessionId = "demo" }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm sm:p-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -65,7 +65,7 @@ export default function ForecastScreen({ sessionId = "demo" }) {
       </div>
 
       {/* Declared Method Card */}
-      <div className="bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-white border border-emerald-600/20 rounded-2xl p-6 shadow-sm">
+      <div className="bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-white border border-emerald-600/20 rounded-2xl p-4 shadow-sm sm:p-6">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-emerald-600/10 pb-4">
           <div>
             <span className="text-[10px] font-bold tracking-widest text-emerald-800 uppercase bg-emerald-100/80 px-2 py-0.5 rounded">
@@ -128,7 +128,7 @@ export default function ForecastScreen({ sessionId = "demo" }) {
       </div>
 
       {/* 4-Baseline Comparison Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4 sm:p-6">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-display font-semibold text-navy text-sm">
@@ -199,7 +199,7 @@ export default function ForecastScreen({ sessionId = "demo" }) {
 
       {/* Multi-Horizon Evaluation Breakdown */}
       {perHorizon.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4 sm:p-6">
           <div>
             <h3 className="font-display font-semibold text-navy text-sm">
               Calibration Evidence Per Horizon Bucket

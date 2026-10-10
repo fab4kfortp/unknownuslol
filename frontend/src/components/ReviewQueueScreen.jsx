@@ -77,7 +77,7 @@ export default function ReviewQueueScreen({ sessionId }) {
   return (
     <div className="flex flex-col gap-8">
       {/* ── Active Learning Review Queue ── */}
-      <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-cardborder shadow-sm p-6">
+      <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-cardborder shadow-sm p-4 sm:p-6">
         <div className="flex items-center gap-2 mb-2">
           <Activity size={20} className="text-teal-600" />
           <h2 className="text-xl font-bold text-navy">Categoriser Review Queue</h2>
@@ -150,7 +150,7 @@ export default function ReviewQueueScreen({ sessionId }) {
       </div>
 
       {/* ── Live Add Transaction ── */}
-      <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-cardborder shadow-sm p-6">
+      <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-cardborder shadow-sm p-4 sm:p-6">
         <div className="flex items-center gap-2 mb-6">
           <Plus size={20} className="text-emerald-600" />
           <h2 className="text-xl font-bold text-navy">Live Transaction Feed</h2>
@@ -219,7 +219,7 @@ export default function ReviewQueueScreen({ sessionId }) {
 
       {/* ── Dataset & RBI/NHA Calibration ── */}
       {calibration && (
-        <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-cardborder shadow-sm p-6 mb-8">
+        <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-cardborder shadow-sm p-4 mb-8 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Database size={20} className="text-indigo-600" />

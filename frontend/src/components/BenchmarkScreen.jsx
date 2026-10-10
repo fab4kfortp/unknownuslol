@@ -289,7 +289,7 @@ export default function BenchmarkScreen({ sessionId }) {
               </p>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="w-full min-w-[760px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-cardborder bg-slate-50/60 text-xs text-slate-500 uppercase tracking-wide">
                     <th className="px-4 py-2.5 font-semibold">Model</th>

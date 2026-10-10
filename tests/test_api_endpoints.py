@@ -21,8 +21,10 @@ from fastapi.testclient import TestClient
 import pytest
 
 from api.main import app
+from tests.auth_helpers import authenticated_client
 
-client = TestClient(app)
+client = authenticated_client()
+SESSION_ID = client.headers["X-Session-ID"]
 
 
 def test_existing_endpoints_retain_shape():
@@ -191,7 +193,7 @@ def test_chat_endpoint_agent_verification():
 
 def test_user_data_lifecycle_and_live_add():
     """Verify upload, live add, and delete user data lifecycle with session isolation."""
-    test_sid = "test-session-lifecycle"
+    test_sid = SESSION_ID
 
     # 1. Live add
     live_txn = {
