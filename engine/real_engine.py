@@ -496,6 +496,26 @@ class RealEngine:
             "series": series,
         }
 
+    def forecast_report(
+        self,
+        user_data: Any,
+        horizon_weeks: int = 8,
+        view: str = "weekly",
+    ) -> dict[str, Any]:
+        transactions = self._transactions(user_data)
+        history_days = self._history_days(transactions)
+
+        if history_days < MIN_HISTORY_DAYS:
+            return self._insufficient(history_days)
+
+        frame = self._frame(transactions)
+        from src.probabilistic_forecast import generate_forecast_report
+        session_id = user_data.get("session_id", "demo") if isinstance(user_data, dict) else "demo"
+        persona = "persona_b" if "persona_b" in str(session_id).lower() else "persona_a"
+        report = generate_forecast_report(frame, horizon_weeks=horizon_weeks, view=view, persona=persona)
+        report["status"] = "ok"
+        return report
+
     def simulate(
         self,
         user_data: Any,
@@ -953,10 +973,74 @@ class RealEngine:
             None,
         )
 
+        replanned_plan = None
+        if recommendation is not None and locks:
+            # Wire replan into existing drift detection
+            drift_lock = locks[0]
+            try:
+                replanned_plan = self.replan(
+                    all_transactions,
+                    plan=drift_lock,
+                    change={
+                        "trigger": "plan_drift",
+                        "drift_reason": recommendation.get("reason", "Lock drifted"),
+                        "reserve": getattr(drift_lock, "reserve", 45000.0) if hasattr(drift_lock, "reserve") else drift_lock.get("reserve", 45000.0),
+                        "goal": getattr(drift_lock, "required_balance", 75000.0) if hasattr(drift_lock, "required_balance") else drift_lock.get("required_balance", 75000.0),
+                    },
+                )
+            except Exception:
+                replanned_plan = None
+
         return {
             "status": "ok",
             "transaction": ingested["accepted"][0],
             "analysis": analysis,
             "drifts": drifts,
             "recommendation": recommendation,
+            "replanned_plan": replanned_plan,
         }
+
+    def plan(
+        self,
+        user_data: Any,
+        sequences: Sequence[Any] = (),
+        reserve: float = 0.0,
+        goal: float = 0.0,
+        view: str = "weekly",
+    ) -> dict[str, Any]:
+        transactions = self._transactions(user_data)
+        history_days = self._history_days(transactions)
+
+        if history_days < MIN_HISTORY_DAYS:
+            return {
+                "status": "insufficient_data",
+                "history_days": history_days,
+                "min_days": MIN_HISTORY_DAYS,
+            }
+
+        frame = self._frame(transactions)
+        from src.lp_planner import build_plan_sequences
+
+        plan_obj = build_plan_sequences(
+            frame,
+            reserve=reserve,
+            goal=goal,
+            horizon_weeks=8,
+            view=view,
+        )
+        plan_dict = plan_obj.model_dump(mode="json")
+        return plan_dict
+
+    def replan(
+        self,
+        user_data: Any,
+        plan: Any,
+        change: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-runs planner from current week with adjusted parameters or new shocks."""
+        transactions = self._transactions(user_data)
+        frame = self._frame(transactions)
+        from src.lp_planner import replan_sequences
+
+        replan_obj = replan_sequences(frame, plan=plan, change=change)
+        return replan_obj.model_dump(mode="json")

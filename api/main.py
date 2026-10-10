@@ -11,13 +11,15 @@ import os
 import sys
 import uuid
 import datetime
+from pathlib import Path
+from typing import Any
 import pandas as pd
 import numpy as np
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -392,6 +394,86 @@ def forecast_user_data(
     }
 
 
+@app.get("/api/forecast-report")
+def get_forecast_report(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+    horizon_weeks: int = Query(default=8),
+    view: str = Query(default="weekly"),
+):
+    """Declared-method probabilistic forecast report with 4 baselines and multi-horizon evidence."""
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    user_data = _user_data(effective_session_id)
+    if hasattr(app.state.engine, "forecast_report"):
+        return app.state.engine.forecast_report(user_data, horizon_weeks=horizon_weeks, view=view)
+    from src.probabilistic_forecast import generate_forecast_report
+    df = _run_pipeline(effective_session_id)
+    persona = "persona_b" if "persona_b" in str(effective_session_id).lower() else "persona_a"
+    return generate_forecast_report(df, horizon_weeks=horizon_weeks, view=view, persona=persona)
+
+
+@app.get("/api/plan")
+def get_plan(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+    reserve: float = Query(default=0.0),
+    goal: float = Query(default=0.0),
+    view: str = Query(default="weekly"),
+):
+    """8-week priority-aware linear program plan scored under Common Random Numbers."""
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    user_data = _user_data(effective_session_id)
+    if hasattr(app.state.engine, "plan"):
+        return app.state.engine.plan(user_data, reserve=reserve, goal=goal, view=view)
+    df = _run_pipeline(effective_session_id)
+    from src.lp_planner import build_plan_sequences
+    plan_obj = build_plan_sequences(df, reserve=reserve, goal=goal, view=view)
+    res = plan_obj.model_dump(mode="json")
+    res["view"] = view
+    return res
+
+
+@app.post("/api/plan")
+def post_plan(
+    body: dict[str, Any] = Body(default_factory=dict),
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Generates an 8-week Plan based on user-defined reserve floor, goal, and horizon."""
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    user_data = _user_data(effective_session_id)
+    reserve = float(body.get("reserve", 0.0))
+    goal = float(body.get("goal", 0.0))
+    view = str(body.get("view", "weekly"))
+    if hasattr(app.state.engine, "plan"):
+        return app.state.engine.plan(user_data, reserve=reserve, goal=goal, view=view)
+    df = _run_pipeline(effective_session_id)
+    from src.lp_planner import build_plan_sequences
+    plan_obj = build_plan_sequences(df, reserve=reserve, goal=goal, view=view)
+    res = plan_obj.model_dump(mode="json")
+    res["view"] = view
+    return res
+
+
+@app.post("/api/replan")
+def post_replan(
+    body: dict[str, Any] = Body(default_factory=dict),
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Re-runs the 8-week planner from current week upon income drop, new expense, or drift."""
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    user_data = _user_data(effective_session_id)
+    plan = body.get("plan", {})
+    change = body.get("change", body)
+    if hasattr(app.state.engine, "replan"):
+        return app.state.engine.replan(user_data, plan=plan, change=change)
+    df = _run_pipeline(effective_session_id)
+    from src.lp_planner import replan_sequences
+    replan_obj = replan_sequences(df, plan=plan, change=change)
+    return replan_obj.model_dump(mode="json")
+
+
 @app.post("/api/simulate")
 def compare_scenarios(
     scenarios: list[Scenario],
@@ -451,13 +533,59 @@ def evaluate_locked_path(
     )
 
 
-@app.post("/api/chat")
-def chat_with_engine(
+@app.delete("/api/delete-my-data")
+def delete_my_data(
     session_id: str | None = Query(default=None),
     x_session_id: str | None = Header(default=None),
 ):
-    """Minimal verified-agent placeholder: it receives engine output, never raw rows."""
+    """Direct alias for deleting session-scoped user data."""
+    return delete_user_data(session_id=session_id, x_session_id=x_session_id)
+
+
+@app.post("/api/live-add")
+def api_live_add(
+    request: LiveTransactionRequest,
+):
+    """Direct alias for posting live transactions."""
+    return post_transaction(request)
+
+
+@app.get("/api/evidence-pack")
+def get_evidence_pack():
+    """Generates/reads all 6 evidence pack artifacts and returns structured summary."""
+    from src.evidence_pack import run_evidence_pack_generation, EVIDENCE_DIR
+    res = run_evidence_pack_generation()
+    artifacts = {}
+    for name, path_str in res.items():
+        p = Path(path_str)
+        artifacts[name] = {
+            "path": path_str,
+            "filename": p.name,
+            "size_bytes": p.stat().st_size if p.exists() else 0,
+            "exists": p.exists(),
+        }
+    return {
+        "status": "ok",
+        "evidence_pack_dir": str(EVIDENCE_DIR),
+        "artifacts": artifacts,
+    }
+
+
+@app.post("/api/chat")
+def chat_with_engine(
+    body: dict[str, Any] = Body(default_factory=dict),
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Verified-agent endpoint: receives query, calls engine/tools, verifies claims deterministically."""
     effective_session_id = _engine_session_id(session_id, x_session_id)
+    query = body.get("query") or body.get("message")
+    if query:
+        df = _run_pipeline(effective_session_id)
+        from src.agent.chat import handle_chat
+        from api.schemas import AgentChatRequest
+        res = handle_chat(AgentChatRequest(query=query), df)
+        return res.model_dump(mode="json")
     analysis = app.state.engine.analyze(_user_data(effective_session_id))
     return {"analysis": analysis, "verified_claims": True}
 

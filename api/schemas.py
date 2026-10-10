@@ -183,6 +183,22 @@ class TransactionInput(BaseModel):
     category: Optional[str] = None
     account_type: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def map_fields(cls, values):
+        if isinstance(values, dict):
+            if "description" not in values:
+                if "merchant" in values:
+                    values["description"] = values.get("merchant")
+                elif "narration" in values:
+                    values["description"] = values.get("narration")
+            if "transaction_type" not in values:
+                if "type" in values:
+                    values["transaction_type"] = values.get("type")
+                elif "tx_type" in values:
+                    values["transaction_type"] = values.get("tx_type")
+        return values
+
 
 class LiveTransactionRequest(BaseModel):
     transaction: TransactionInput
