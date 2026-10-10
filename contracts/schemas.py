@@ -5,10 +5,23 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
+from enum import Enum
 from pydantic import BaseModel, Field, field_validator
 
 
 Tag = Literal["observed", "predicted", "recommended"]
+
+
+class Priority(str, Enum):
+    Critical = "Critical"
+    High = "High"
+    Medium = "Medium"
+    Low = "Low"
+
+
+class TransactionType(str, Enum):
+    debit = "debit"
+    credit = "credit"
 
 
 class Transaction(BaseModel):
@@ -16,10 +29,10 @@ class Transaction(BaseModel):
     date: date
     narration: str
     amount: float = Field(gt=0)
-    type: Literal["debit", "credit"]
+    type: TransactionType | Literal["debit", "credit"]
     category: str = "uncategorised"
     category_confidence: float = Field(default=0.0, ge=0, le=1)
-    priority: Literal["Critical", "High", "Medium", "Low"] = "Low"
+    priority: Priority | Literal["Critical", "High", "Medium", "Low"] = Priority.Low
     balance: float | None = None
     is_duplicate: bool = False
 

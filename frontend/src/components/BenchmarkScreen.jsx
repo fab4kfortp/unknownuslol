@@ -164,7 +164,7 @@ function MetricCell({ value, best, isWidth }) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function BenchmarkScreen() {
+export default function BenchmarkScreen({ sessionId }) {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
@@ -172,13 +172,13 @@ export default function BenchmarkScreen() {
   const load = () => {
     setLoading(true);
     setError(null);
-    fetchTwinBenchmark()
+    fetchTwinBenchmark(sessionId)
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(load, [sessionId]);
 
   // Build unified model rows from API data + derived baselines
   const twinMetrics = data?.metrics ?? null;

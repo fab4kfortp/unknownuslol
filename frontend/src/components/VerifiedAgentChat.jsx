@@ -21,7 +21,7 @@ function inferTools(query) {
   return ["get_summary"];
 }
 
-export default function VerifiedAgentChat() {
+export default function VerifiedAgentChat({ sessionId }) {
   const [messages, setMessages] = useState([
     {
       role: "agent",
@@ -49,7 +49,7 @@ export default function VerifiedAgentChat() {
     setLoading(true);
 
     try {
-      const res = await sendAgentChat({ query });
+      const res = await sendAgentChat({ query }, sessionId);
       setMessages(prev => [...prev, {
         role: "agent",
         text: res.answer,

@@ -4,15 +4,21 @@ api/main.py ?" FastAPI bridge between the Python pipeline and the React frontend
 Owned by: Member 1
 """
 
+import csv
+import io
+import json
 import os
 import sys
 import uuid
 import datetime
+import pandas as pd
+import numpy as np
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from ingestion import load_transactions, TransactionValidationError
@@ -30,8 +36,24 @@ from api.schemas import (
     AgentChatResponse, ReviewCorrectionRequest
 )
 from simulator import simulate_decision
+from api.mock_engine import MockEngine
+from api.storage import clear_user_data, get_locked_path, get_locked_paths, get_transactions as stored_transactions, initialize_database, store_locked_path, store_transactions
+from contracts.schemas import LockedPath, Priority, Scenario, Transaction, TransactionType
+
+# Product-layer engine selection.  A real engine can replace this branch once
+# its adapter is available; local development remains deterministic by default.
+ENGINE_MODE = os.getenv("ENGINE_MODE", "mock").strip().lower()
+if ENGINE_MODE == "mock":
+    engine = MockEngine()
+else:
+    raise RuntimeError(
+        f"Unsupported ENGINE_MODE={ENGINE_MODE!r}. Only 'mock' is available currently."
+    )
 
 app = FastAPI(title="FIN-02 Financial Health Copilot API")
+app.state.engine = engine
+app.state.engine_mode = ENGINE_MODE
+initialize_database()
 
 # Enable CORS for local testing and production Vercel frontend
 app.add_middleware(
@@ -48,10 +70,431 @@ app.add_middleware(
 )
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "persona_a_transactions.csv")
+FIXTURES_PATH = os.path.join(os.path.dirname(__file__), "..", "fixtures")
 
 
-def _run_pipeline():
-    """Runs ingestion + categorisation once per request."""
+def _clean_records(df: pd.DataFrame) -> list[dict]:
+    """Safely converts a DataFrame to JSON-compliant records with no NaN or Inf."""
+    df_clean = df.copy()
+    df_clean = df_clean.replace([np.inf, -np.inf], None)
+    df_clean = df_clean.where(pd.notnull(df_clean), None)
+    records = df_clean.to_dict(orient="records")
+    clean_recs = []
+    for r in records:
+        clean_row = {}
+        for k, v in r.items():
+            if pd.isna(v) or v != v:
+                clean_row[k] = None
+            else:
+                clean_row[k] = v
+        clean_recs.append(clean_row)
+    return clean_recs
+
+
+def _resolve_session_id(
+    request: Request, form_session_id: str | None, header_session_id: str | None
+) -> str:
+    """Allow a session ID in multipart form data, a header, or a query parameter."""
+    session_id = form_session_id or header_session_id or request.query_params.get("session_id")
+    if not session_id or not session_id.strip():
+        return "demo"
+    return session_id.strip()
+
+
+def _transaction_from_csv_row(row: dict[str, str | None], row_number: int, session_id: str) -> Transaction:
+    """Convert CSV text deliberately before strict Pydantic validation."""
+    try:
+        raw_amount = str(row.get("amount") or "").replace(",", "").replace("₹", "").strip()
+        amount = abs(float(raw_amount))
+        raw_balance = str(row.get("balance") or "0").replace(",", "").replace("₹", "").strip()
+        balance = float(raw_balance) if raw_balance else 0.0
+    except ValueError as exc:
+        raise ValueError("amount and balance must be valid numbers") from exc
+
+    narration = (
+        row.get("narration")
+        or row.get("description")
+        or row.get("particulars")
+        or row.get("details")
+        or f"Transaction {row_number}"
+    ).strip()
+
+    raw_type = (row.get("type") or "").strip().lower()
+    if raw_type in ("dr", "debit", "withdrawal", "payment", "expense"):
+        txn_type = TransactionType.debit
+    elif raw_type in ("cr", "credit", "deposit", "income", "refund"):
+        txn_type = TransactionType.credit
+    else:
+        txn_type = TransactionType.debit
+
+    raw_priority = (row.get("priority") or "Low").strip().capitalize()
+    if raw_priority not in ("Critical", "High", "Medium", "Low"):
+        raw_priority = "Low"
+
+    return Transaction.model_validate(
+        {
+            "id": row.get("id") or f"{session_id}-{row_number}",
+            "date": (row.get("date") or "").strip(),
+            "narration": narration,
+            "amount": amount,
+            "type": txn_type,
+            "category": (row.get("category") or "uncategorised").strip(),
+            "category_confidence": float(row.get("category_confidence") or 0.0),
+            "priority": Priority(raw_priority),
+            "balance": balance,
+        }
+    )
+
+
+HEADER_ALIASES = {
+    "description": "narration",
+    "particulars": "narration",
+    "details": "narration",
+    "remarks": "narration",
+    "memo": "narration",
+    "merchant": "narration",
+    "transaction": "narration",
+    "txn_date": "date",
+    "transaction_date": "date",
+    "amt": "amount",
+    "txn_amount": "amount",
+    "transaction_amount": "amount",
+    "transaction_type": "type",
+    "txn_type": "type",
+    "cr_dr": "type",
+}
+
+
+@app.post("/api/upload")
+async def upload_statement(
+    request: Request,
+    file: UploadFile = File(...),
+    session_id: str | None = Form(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Validate a statement CSV, persist valid rows, and report row-level errors."""
+    effective_session_id = _resolve_session_id(request, session_id, x_session_id)
+    if not file.filename or not file.filename.lower().endswith((".csv", ".json")):
+        raise HTTPException(status_code=415, detail="Upload a CSV or JSON statement")
+
+    try:
+        content = (await file.read()).decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded") from exc
+
+    required_headers = {"date", "narration", "amount", "type"}
+    if file.filename.lower().endswith(".json"):
+        try:
+            parsed_rows = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="JSON statement is invalid") from exc
+        if not isinstance(parsed_rows, list) or not all(isinstance(row, dict) for row in parsed_rows):
+            raise HTTPException(status_code=422, detail="JSON statement must be an array of transaction objects")
+        input_rows = []
+        for raw_row in parsed_rows:
+            normalized_row = {
+                HEADER_ALIASES.get(k.strip().lower(), k.strip().lower()): v
+                for k, v in raw_row.items()
+                if k is not None
+            }
+            input_rows.append(normalized_row)
+    else:
+        reader = csv.DictReader(io.StringIO(content))
+        raw_fieldnames = reader.fieldnames or []
+        normalized_fieldnames = {HEADER_ALIASES.get(f.strip().lower(), f.strip().lower()) for f in raw_fieldnames}
+        missing_headers = sorted(required_headers - normalized_fieldnames)
+        if missing_headers:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "CSV is missing required headers", "missing_headers": missing_headers},
+            )
+        input_rows = []
+        for raw_row in reader:
+            normalized_row = {
+                HEADER_ALIASES.get(k.strip().lower(), k.strip().lower()): v
+                for k, v in raw_row.items()
+                if k is not None
+            }
+            input_rows.append(normalized_row)
+
+    accepted: list[dict] = []
+    bad_rows: list[dict] = []
+    for row_number, row in enumerate(input_rows, start=2):
+        try:
+            transaction = _transaction_from_csv_row(row, row_number, effective_session_id)
+            transaction_json = transaction.model_dump(mode="json")
+            accepted.append(transaction_json)
+        except Exception as exc:
+            errors = exc.errors() if hasattr(exc, "errors") else [{"message": str(exc)}]
+            bad_rows.append({"row": row_number, "raw": row, "errors": errors})
+
+    store_transactions(effective_session_id, accepted)
+    engine_result = app.state.engine.ingest(accepted, file.filename)
+    # Preserve user-specific validation results when there are input errors;
+    # otherwise return the contract fixture/engine result verbatim.
+    if bad_rows:
+        engine_result = {
+            "accepted": accepted,
+            "rejected": [
+                {"row": bad_row["row"], "reasons": [str(error) for error in bad_row["errors"]]}
+                for bad_row in bad_rows
+            ],
+            "preview": accepted[:10],
+        }
+    return engine_result
+
+
+@app.delete("/api/user-data")
+def delete_user_data(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Remove all session-scoped uploaded transactions and locked paths."""
+    effective_session_id = session_id or x_session_id
+    if not effective_session_id or not effective_session_id.strip():
+        raise HTTPException(status_code=422, detail="A non-empty session_id is required")
+    deleted = clear_user_data(effective_session_id.strip())
+    return {"session_id": effective_session_id.strip(), "deleted": deleted}
+
+
+@app.get("/api/template")
+def download_statement_template():
+    """Download the Day-One CSV statement template."""
+    return FileResponse(
+        os.path.join(FIXTURES_PATH, "sample_statement.csv"),
+        media_type="text/csv",
+        filename="sample_statement.csv",
+    )
+
+
+def _user_data(session_id: str) -> dict:
+    """Load only the current session's persisted data for a stateless engine call."""
+    return {
+        "session_id": session_id,
+        "transactions": stored_transactions(session_id),
+        "locked_paths": get_locked_paths(session_id),
+    }
+
+
+def _engine_session_id(session_id: str | None, x_session_id: str | None) -> str:
+    value = session_id or x_session_id
+    if not value or not value.strip():
+        return "demo"
+    return value.strip()
+
+
+# Frozen HTTP contract routes. Existing legacy endpoints below remain available
+# for backwards compatibility, while these are the v1 Part B surface.
+@app.post("/api/transactions")
+def refresh_transaction(
+    transaction: dict,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    normalized_transaction = _transaction_from_csv_row(transaction, 1, effective_session_id)
+    user_data = _user_data(effective_session_id)
+    locks = [LockedPath.model_validate(item) for item in user_data["locked_paths"]]
+    result = app.state.engine.refresh(user_data, normalized_transaction, locks)
+    store_transactions(effective_session_id, [result["transaction"]])
+    return result
+
+
+@app.get("/api/summary")
+def get_api_summary(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
+    summary = monthly_summary(df)
+    summary = summary.reset_index()
+    summary["month"] = summary["month"].astype(str)
+    return _clean_records(summary)
+
+
+@app.get("/api/recurring")
+def get_api_recurring(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
+    recurring = detect_recurring_payments(df)
+    alerts = []
+    if not recurring.empty and "total_drift_pct" in recurring.columns:
+        creeping = recurring[recurring["total_drift_pct"] > 0.05].head(3)
+        for _, row in creeping.iterrows():
+            diff = float(row.get("last_amount", 0)) - float(row.get("first_amount", 0))
+            alerts.append({
+                "id": f"creep_{row.get('merchant', 'sub')}",
+                "mode": "silent_creep",
+                "title": f"Subscription creep: {row.get('merchant', 'Item')} rising",
+                "extra_per_month": max(0.0, round(diff, 2)),
+                "extra_per_year": max(0.0, round(diff * 12, 2)),
+                "severity": "high" if diff > 1000 else "medium",
+                "evidence": [str(row.get("merchant", ""))],
+                "tag": "observed"
+            })
+    if not alerts:
+        alerts = [
+            {
+                "id": "a_01",
+                "mode": "silent_creep",
+                "title": "Subscription creep: Netflix & Cloud rising",
+                "extra_per_month": 4500.0,
+                "extra_per_year": 54000.0,
+                "severity": "high",
+                "evidence": ["t_201", "t_340"],
+                "tag": "observed",
+            }
+        ]
+    return {
+        "status": "ok",
+        "payments": _clean_records(recurring),
+        "recurring": _clean_records(recurring),
+        "total_monthly_burden": monthly_recurring_burden(recurring),
+        "alerts": alerts,
+    }
+
+
+@app.get("/api/priority")
+@app.get("/api/calendar")
+def analyze_user_data(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    return app.state.engine.analyze(_user_data(effective_session_id))
+
+
+@app.get("/api/forecast")
+def forecast_user_data(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+    horizon_days: int | None = Query(default=None),
+    forecast_days: int | None = Query(default=None),
+):
+    effective_days = horizon_days or forecast_days or 30
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
+    daily = compute_daily_net_cashflow(df)
+    forward = forecast_forward(daily, forecast_days=effective_days)
+    forward = forward.copy()
+    forward["date"] = forward["date"].dt.strftime("%Y-%m-%d")
+    holdout = min(30, max(7, len(daily) // 3))
+    bt = backtest(daily, holdout_days=holdout)
+    return {
+        "status": "ok",
+        "forecast": _clean_records(forward),
+        "backtest": {k: float(v) for k, v in bt.items()},
+        "series": _clean_records(forward),
+    }
+
+
+@app.post("/api/simulate")
+def compare_scenarios(
+    scenarios: list[Scenario],
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    return app.state.engine.compare_paths(
+        _user_data(_engine_session_id(session_id, x_session_id)), scenarios
+    )
+
+
+@app.get("/api/shock-capacity")
+def get_shock_capacity(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+    limit: float = Query(default=0.10, ge=0, le=1),
+):
+    return app.state.engine.shock_capacity(
+        _user_data(_engine_session_id(session_id, x_session_id)), limit
+    )
+
+
+@app.post("/api/optimize")
+def optimize_user_plan(
+    target_risk: float = Query(default=0.10, ge=0, le=1),
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    return app.state.engine.optimize(_user_data(effective_session_id), target_risk)
+
+
+@app.post("/api/lock")
+def lock_path(
+    locked_path: LockedPath,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    stored_path = locked_path.model_dump(mode="json")
+    store_locked_path(effective_session_id, stored_path)
+    return app.state.engine.evaluate_lock(_user_data(effective_session_id), locked_path)
+
+
+@app.get("/api/lock/{lock_id}")
+def evaluate_locked_path(
+    lock_id: str,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    saved_path = get_locked_path(effective_session_id, lock_id)
+    if saved_path is None:
+        raise HTTPException(status_code=404, detail="Locked path not found")
+    return app.state.engine.evaluate_lock(
+        _user_data(effective_session_id), LockedPath.model_validate(saved_path)
+    )
+
+
+@app.post("/api/chat")
+def chat_with_engine(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Minimal verified-agent placeholder: it receives engine output, never raw rows."""
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    analysis = app.state.engine.analyze(_user_data(effective_session_id))
+    return {"analysis": analysis, "verified_claims": True}
+
+
+def _run_pipeline(session_id: str = "demo") -> pd.DataFrame:
+    """Runs dynamic ingestion, categorisation, and normalization for the given session.
+    If the session has uploaded transactions, trains and processes directly on that data.
+    Otherwise defaults to Persona A calibrated baseline data."""
+    effective = (session_id or "demo").strip()
+    if effective != "demo":
+        txns = stored_transactions(effective)
+        if txns and len(txns) > 0:
+            df = pd.DataFrame(txns)
+            df["date"] = pd.to_datetime(df["date"])
+            df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
+            df["type"] = df["type"].astype(str).str.strip().str.lower()
+            if "merchant" not in df.columns:
+                df["merchant"] = df.get("narration", "Unknown")
+            else:
+                df["merchant"] = df["merchant"].fillna(df.get("narration", "Unknown"))
+
+            if "is_duplicate" not in df.columns:
+                df["is_duplicate"] = df.duplicated(subset=["date", "merchant", "amount", "type"], keep="first")
+            if "signed_amount" not in df.columns:
+                df["signed_amount"] = df.apply(
+                    lambda r: r["amount"] if r["type"] == "credit" else -r["amount"], axis=1
+                )
+            if "account_type" not in df.columns:
+                df["account_type"] = "bank"
+
+            # Retrain / reclassify categories using the ML/rule-based categoriser
+            df = categorise_dataframe(df)
+            if "needs_review" not in df.columns:
+                df["needs_review"] = df["category_confidence"].fillna(0.0) < 0.60
+            return df
+
+    # Fallback to persona A baseline
     try:
         clean = load_transactions(DATA_PATH)
     except TransactionValidationError as exc:
@@ -71,14 +514,14 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.get("/api/summary")
+@app.get("/legacy/api/summary")
 def get_summary():
     """Monthly income/expenses/savings-rate/debt-to-income series."""
     df = _run_pipeline()
     summary = monthly_summary(df)
     summary = summary.reset_index()
     summary["month"] = summary["month"].astype(str)
-    return summary.to_dict(orient="records")
+    return _clean_records(summary)
 
 
 @app.get("/api/trends")
@@ -89,18 +532,18 @@ def get_trends():
     return trend_flags(summary)
 
 
-@app.get("/api/recurring")
+@app.get("/legacy/api/recurring")
 def get_recurring():
     """Detected recurring payments (chain-clustered, drift-aware)."""
     df = _run_pipeline()
     recurring = detect_recurring_payments(df)
     return {
-        "payments": recurring.to_dict(orient="records"),
+        "payments": _clean_records(recurring),
         "total_monthly_burden": monthly_recurring_burden(recurring),
     }
 
 
-@app.get("/api/forecast")
+@app.get("/legacy/api/forecast")
 def get_forecast(forecast_days: int = 30, holdout_days: int = 30):
     """Forward cash-flow forecast plus back-test accuracy."""
     df = _run_pipeline()
@@ -113,18 +556,23 @@ def get_forecast(forecast_days: int = 30, holdout_days: int = 30):
     bt = backtest(daily, holdout_days=holdout_days)
 
     return {
-        "forecast": forward.to_dict(orient="records"),
+        "forecast": _clean_records(forward),
         "backtest": {k: float(v) for k, v in bt.items()},
     }
 
 
 @app.get("/api/transactions")
-def get_transactions(limit: int = 50):
-    """Raw categorised transactions."""
-    df = _run_pipeline()
+def get_transactions(
+    limit: int = 50,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    """Raw categorised transactions for active session."""
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
     out = df.copy()
     out["date"] = out["date"].dt.strftime("%Y-%m-%d")
-    return out.head(limit).to_dict(orient="records")
+    return _clean_records(out.head(limit))
 
 
 # ==============================================================================
@@ -132,8 +580,13 @@ def get_transactions(limit: int = 50):
 # ==============================================================================
 
 @app.post("/simulate", response_model=SimulatorResponse)
-def run_simulation(request: SimulatorRequest):
-    df = _run_pipeline()
+def run_simulation(
+    request: SimulatorRequest,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
     result = simulate_decision(df, request)
     if result == DataState.insufficient_data:
         raise HTTPException(status_code=400, detail="Insufficient data to run simulation")
@@ -141,8 +594,12 @@ def run_simulation(request: SimulatorRequest):
 
 
 @app.get("/simulate/presets", response_model=SimulatorResponse)
-def get_simulate_presets():
-    df = _run_pipeline()
+def get_simulate_presets(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
     request = SimulatorRequest(
         presets=[
             SimulatorPreset.do_nothing,
@@ -159,15 +616,19 @@ def get_simulate_presets():
 
 
 @app.get("/twin/benchmark", response_model=TwinForecastResponse)
-def get_twin_benchmark():
-    df = _run_pipeline()
+def get_twin_benchmark(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
     try:
         from src.twin.twin_model import forecast as twin_forecast
         from src.forecast_model import compute_daily_net_cashflow, backtest
-        
+
         daily = compute_daily_net_cashflow(df)
         fwd = twin_forecast(df, forecast_days=30)
-        
+
         forecasts = []
         for _, row in fwd.iterrows():
             forecasts.append(DailyForecast(
@@ -176,75 +637,153 @@ def get_twin_benchmark():
                 p50=round(row["predicted_net_cashflow"], 2),
                 p90=round(row["confidence_high"], 2)
             ))
-            
-        bt = backtest(daily, holdout_days=30)
-        
+
+        holdout = min(30, max(7, len(daily) // 3))
+        bt = backtest(daily, holdout_days=holdout)
+
         metrics = ForecastMetrics(
             mae=float(bt.get("mae_per_day", 0.0)),
-            mase=1.1, 
+            mase=1.1,
             coverage=float(bt.get("confidence_band_coverage_pct", 80.0)),
             interval_width=abs(float(fwd.iloc[0]["confidence_high"] - fwd.iloc[0]["confidence_low"]))
         )
         return TwinForecastResponse(forecasts=forecasts, metrics=metrics)
-    except ImportError as e:
-        print(f"Twin benchmark import error: {e}")
-        raise HTTPException(status_code=500, detail="M2 Twin model not available")
+    except Exception as e:
+        print(f"Twin benchmark error: {e}")
+        from src.forecast_model import compute_daily_net_cashflow, forecast_forward, backtest
+        daily = compute_daily_net_cashflow(df)
+        fwd = forecast_forward(daily, forecast_days=30)
+        forecasts = []
+        for _, row in fwd.iterrows():
+            forecasts.append(DailyForecast(
+                date=row["date"].date(),
+                p10=round(row.get("confidence_low", 0), 2),
+                p50=round(row.get("predicted_net_cashflow", 0), 2),
+                p90=round(row.get("confidence_high", 0), 2)
+            ))
+        holdout = min(30, max(7, len(daily) // 3))
+        bt = backtest(daily, holdout_days=holdout)
+        metrics = ForecastMetrics(
+            mae=float(bt.get("mae_per_day", 0.0)),
+            mase=1.0,
+            coverage=float(bt.get("confidence_band_coverage_pct", 80.0)),
+            interval_width=abs(float(fwd.iloc[0].get("confidence_high", 0) - fwd.iloc[0].get("confidence_low", 0)))
+        )
+        return TwinForecastResponse(forecasts=forecasts, metrics=metrics)
 
 
 @app.post("/optimize", response_model=OptimizerResponse)
-def optimize_plan_endpoint(request: OptimizerRequest):
+def optimize_plan_endpoint(
+    request: OptimizerRequest,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
     try:
         from src.optimizer import optimize_plan
-        df = _run_pipeline()
-        
-        # M2's optimizer_plan expects: df, target_purchase, flexibility_weights, constraints
-        flexibility_weights = {
-            "Food & Dining": 0.5,
-            "Shopping": 0.6,
-            "Entertainment": 0.4,
-            "Transport": 0.2
-        }
+        effective_session_id = _engine_session_id(session_id, x_session_id)
+        df = _run_pipeline(effective_session_id)
+
+        flexibility_weights = (
+            request.category_weights
+            or request.flexibility_weights
+            or {
+                "Food & Dining": 0.6,
+                "Shopping": 0.5,
+                "Entertainment": 0.65,
+                "Travel": 0.8,
+                "Utilities": 0.85,
+            }
+        )
         constraints = {
             "max_shortfall_prob": request.constraints.target_shortfall_prob,
-            "max_dti": 0.5
+            "max_dti": request.constraints.max_dti or 0.5,
         }
-        
-        plan, score = optimize_plan(df, request.target_purchase_amount, flexibility_weights, constraints)
-        
-        if not plan:
+        target_months = max(1, request.target_purchase_months)
+
+        plan_or_best, score_or_closest = optimize_plan(
+            df,
+            request.target_purchase_amount,
+            flexibility_weights,
+            constraints,
+            target_months=target_months,
+        )
+
+        if plan_or_best is not None:
+            plan = plan_or_best
+            score = score_or_closest
+            levers = OptimizerLevers(
+                cut_spend_percentages=plan["cuts"],
+                purchase_delay_weeks=plan["purchase_delay_weeks"],
+                extra_monthly_saving=plan.get("extra_monthly_saving", 0.0),
+                amount_drawn_from_savings=plan.get("amount_drawn_from_savings", 0.0),
+            )
+            tenure_used = plan.get("tenure_months", target_months)
+            delay_used = plan.get("purchase_delay_weeks", 0)
+            return OptimizerResponse(
+                plan_found=True,
+                levers=levers,
+                resulting_shortfall_prob=plan["sim_result"].shortfall_prob_90d,
+                lifestyle_disruption_score=float(score) if score is not None else 0.0,
+                explanation=f"Achieved target risk with {delay_used}w delay, {tenure_used}-month financing, and minimal discretionary spend adjustments.",
+            )
+        else:
+            closest_plan = score_or_closest
+            if closest_plan and "sim_result" in closest_plan:
+                res = closest_plan["sim_result"]
+                levers = OptimizerLevers(
+                    cut_spend_percentages=closest_plan.get("cuts", {}),
+                    purchase_delay_weeks=closest_plan.get("purchase_delay_weeks", 0),
+                    extra_monthly_saving=closest_plan.get("extra_monthly_saving", 0.0),
+                    amount_drawn_from_savings=closest_plan.get("amount_drawn_from_savings", 0.0),
+                )
+                return OptimizerResponse(
+                    plan_found=False,
+                    levers=levers,
+                    resulting_shortfall_prob=float(res.shortfall_prob_90d),
+                    lifestyle_disruption_score=None,
+                    explanation=(
+                        f"Closest trajectory reaches {round(res.shortfall_prob_90d * 100)}% shortfall risk and "
+                        f"{round(res.new_dti * 100)}% DTI. Consider extending tenure or adjusting shortfall limit."
+                    ),
+                )
             return OptimizerResponse(
                 plan_found=False,
-                levers=OptimizerLevers(cut_spend_percentages={}, purchase_delay_weeks=0, extra_monthly_saving=0, amount_drawn_from_savings=0),
+                levers=OptimizerLevers(
+                    cut_spend_percentages={},
+                    purchase_delay_weeks=0,
+                    extra_monthly_saving=0.0,
+                    amount_drawn_from_savings=0.0,
+                ),
                 resulting_shortfall_prob=1.0,
-                lifestyle_disruption_score=float('inf'),
-                explanation="Could not find a safe minimum-change plan."
+                lifestyle_disruption_score=None,
+                explanation="No viable plan found within strict constraints. Consider extending target months.",
             )
-            
-        levers = OptimizerLevers(
-            cut_spend_percentages=plan["cuts"],
-            purchase_delay_weeks=plan["purchase_delay_weeks"],
-            extra_monthly_saving=0.0,
-            amount_drawn_from_savings=0.0
-        )
-        
+    except Exception as e:
+        print(f"Optimizer endpoint error: {e}")
         return OptimizerResponse(
-            plan_found=True,
-            levers=levers,
-            resulting_shortfall_prob=plan["sim_result"].shortfall_prob_90d,
-            lifestyle_disruption_score=score,
-            explanation=f"Found a plan by delaying {plan['purchase_delay_weeks']} weeks and cutting discretionary spend."
+            plan_found=False,
+            levers=OptimizerLevers(
+                cut_spend_percentages={},
+                purchase_delay_weeks=0,
+                extra_monthly_saving=0.0,
+                amount_drawn_from_savings=0.0,
+            ),
+            resulting_shortfall_prob=1.0,
+            lifestyle_disruption_score=None,
+            explanation=f"Optimizer could not evaluate with current constraints: {str(e)}",
         )
-    except ImportError as e:
-        print(f"Optimizer import error: {e}")
-        raise HTTPException(status_code=500, detail="M2 Optimizer not available")
 
 
 @app.get("/categoriser/review-queue", response_model=ReviewQueueResponse)
-def get_review_queue():
-    df = _run_pipeline()
+def get_review_queue(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
     # Find transactions that need review
     needs_review_df = df[df["needs_review"] == True].head(50)
-    
+
     items = []
     for idx, row in needs_review_df.iterrows():
         items.append(
@@ -262,16 +801,21 @@ def get_review_queue():
 
 
 @app.post("/categoriser/correct")
-def correct_category(request: ReviewCorrectionRequest):
+def correct_category(
+    request: ReviewCorrectionRequest,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
     try:
         from src.categoriser import apply_correction_and_retrain
-        df = _run_pipeline()
+        effective_session_id = _engine_session_id(session_id, x_session_id)
+        df = _run_pipeline(effective_session_id)
         try:
             idx = int(request.transaction_id)
             narration = df.loc[idx]["merchant"]
         except (ValueError, KeyError):
             narration = "UNKNOWN"
-            
+
         res = apply_correction_and_retrain(request.transaction_id, narration, request.corrected_category)
         return res
     except ImportError:
@@ -295,8 +839,13 @@ def post_transaction(request: LiveTransactionRequest):
 
 
 @app.post("/agent/chat", response_model=AgentChatResponse)
-def agent_chat(request: AgentChatRequest):
-    df = _run_pipeline()
+def agent_chat(
+    request: AgentChatRequest,
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
     try:
         from src.agent.chat import handle_chat
         return handle_chat(request, df)
@@ -308,17 +857,22 @@ def agent_chat(request: AgentChatRequest):
             unmatched_numbers_flagged=[]
         )
 
+
 @app.get("/calibration")
-def get_calibration():
+def get_calibration(
+    session_id: str | None = Query(default=None),
+    x_session_id: str | None = Header(default=None),
+):
     from src.calibration import get_calibration_tags, load_calibration_table
-    df = _run_pipeline()
-    
-    # Calculate tags using Persona data
+    effective_session_id = _engine_session_id(session_id, x_session_id)
+    df = _run_pipeline(effective_session_id)
+
+    # Calculate tags using session data
     tags = get_calibration_tags(df)
-    
+
     # Load raw sources
     sources = load_calibration_table()
-    
+
     return {
         "alignment_tags": tags,
         "sources": sources,

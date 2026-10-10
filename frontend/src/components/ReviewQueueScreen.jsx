@@ -12,7 +12,7 @@ const CATEGORIES = [
 
 const fmt = (n) => `₹${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
-export default function ReviewQueueScreen() {
+export default function ReviewQueueScreen({ sessionId }) {
   const [queue, setQueue] = useState([]);
   const [calibration, setCalibration] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -27,7 +27,7 @@ export default function ReviewQueueScreen() {
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    Promise.all([fetchReviewQueue(), fetchCalibration()])
+    Promise.all([fetchReviewQueue(sessionId), fetchCalibration(sessionId)])
       .then(([queueRes, calibRes]) => {
         setQueue(queueRes.items || []);
         setCalibration(calibRes);
@@ -37,11 +37,11 @@ export default function ReviewQueueScreen() {
         console.error(err);
         setLoading(false);
       });
-  }, []);
+  }, [sessionId]);
 
   const handleCorrect = (id, newCategory) => {
     setRetrainingFeedback(null);
-    submitCategoryCorrection({ transaction_id: id, corrected_category: newCategory })
+    submitCategoryCorrection({ transaction_id: id, corrected_category: newCategory }, sessionId)
       .then((res) => {
         setRetrainingFeedback({ id, acc: res.new_accuracy });
         setQueue((prev) => prev.filter((item) => item.transaction_id !== id));
