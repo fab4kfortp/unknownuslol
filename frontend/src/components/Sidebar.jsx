@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
+import LanguageSwitcher from "./LanguageSwitcher.jsx";
 
 const MOBILE_TABS = ["dashboard", "transactions", "priority", "calendar"];
 
@@ -50,7 +51,7 @@ function Sidebar({ tabs, activeTab, onSelect, onSwitchMode }) {
   return (
     <>
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-cardborder bg-white/70 backdrop-blur-xl md:flex">
-        <div className="px-5 py-6"><Brand /></div>
+        <div className="space-y-4 px-5 py-6"><Brand /><LanguageSwitcher /></div>
         <nav aria-label="Main navigation" className="flex-1 space-y-1 overflow-y-auto px-3">
           {tabs.map((tab) => renderTab(tab))}
         </nav>
@@ -63,7 +64,7 @@ function Sidebar({ tabs, activeTab, onSelect, onSwitchMode }) {
 
       <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b border-cardborder bg-white/95 px-4 shadow-sm backdrop-blur md:hidden">
         <Brand compact />
-        <span className="max-w-[45%] truncate text-right text-xs font-semibold text-slate-500">{tabs.find((tab) => tab.id === activeTab)?.label}</span>
+        <div className="flex min-w-0 items-center gap-2"><span className="max-w-[35vw] truncate text-right text-xs font-semibold text-slate-500">{tabs.find((tab) => tab.id === activeTab)?.label}</span><LanguageSwitcher compact /></div>
       </header>
 
       {moreOpen && <button type="button" aria-label="Close navigation menu" className="fixed inset-0 z-40 bg-slate-950/30 md:hidden" onClick={() => setMoreOpen(false)} />}

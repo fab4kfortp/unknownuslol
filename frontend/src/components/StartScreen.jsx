@@ -15,6 +15,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { downloadStatementTemplate, uploadStatement } from "../api";
+import LanguageSwitcher from "./LanguageSwitcher.jsx";
 
 export default function StartScreen({ sessionId, onSelectDemo, onUploadComplete, onLogout }) {
   const [file, setFile] = useState(null);
@@ -63,7 +64,8 @@ export default function StartScreen({ sessionId, onSelectDemo, onUploadComplete,
   };
 
   return (
-    <div className="min-h-screen app-bg flex flex-col justify-center items-center px-4 pb-8 pt-20 sm:py-12">
+    <div className="relative min-h-screen app-bg flex flex-col justify-center items-center px-4 pb-8 pt-20 sm:py-12">
+      <div className="fixed left-3 top-3 z-10 sm:left-5 sm:top-5"><LanguageSwitcher /></div>
       <button
         type="button"
         onClick={onLogout}

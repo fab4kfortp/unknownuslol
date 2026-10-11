@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowRight, Eye, EyeOff, LockKeyhole, ShieldCheck } from "lucide-react";
 import { loginAccount, registerAccount } from "../api";
+import LanguageSwitcher from "./LanguageSwitcher.jsx";
 
 export default function LoginScreen({ onAuthenticated }) {
   const [mode, setMode] = useState("login");
@@ -27,7 +28,8 @@ export default function LoginScreen({ onAuthenticated }) {
   }
 
   return (
-    <main className="min-h-screen app-bg flex items-center justify-center px-4 py-10">
+    <main className="relative min-h-screen app-bg flex items-center justify-center px-4 py-16 sm:py-10">
+      <div className="absolute right-4 top-4"><LanguageSwitcher /></div>
       <section className="w-full max-w-md rounded-[2rem] bg-white p-8 shadow-2xl shadow-emerald-950/10 sm:p-10">
         <div className="mb-8 text-center">
           <img src="/logo-icon.png" alt="SpendShield" className="mx-auto mb-4 h-14 w-14 object-contain" />
